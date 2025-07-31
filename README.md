@@ -3,9 +3,10 @@
 
 ## Team members and specilizations
 
-| Name                    | Spec            |
-| ----------------------- | --------------- |
-| Henri Chemla            | Web Application |
+| Name              | Spec            |
+|-------------------| --------------- |
+| Henri Chemla      | Web Application |
+| Trey Miller-Henry | Web Application |
 
 
 
