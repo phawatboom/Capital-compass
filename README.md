@@ -7,7 +7,7 @@
 |-------------------| --------------- |
 | Henri Chemla      | Web Application |
 | Trey Miller-Henry | Web Application |
-| Charles Benson    | Model           |
+| Charles Benson    | Model/Stats     |
 
 ## Web Application ERD draw.io
 
