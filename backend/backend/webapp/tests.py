@@ -69,3 +69,55 @@ class CSVUploadTest(TestCase):
         if os.path.exists(uploaded_file_path):
             os.remove(uploaded_file_path)
 
+
+# This test simulates uploading a CSV from outside the project directory(e.g. your Downloads folder).
+# To test it, replace the placeholder path with a real path to a CSV file on your computer and uncomment the test.
+
+# class ExternalCSVUploadTest(TestCase):
+#     def setUp(self):
+#         self.client = Client()
+#         self.url = reverse("upload-csv")
+
+#     def test_upload_csv_from_outside_project(self):
+#         # Replace this with a real CSV file path on your device
+#         outside_csv_path = r"<drive>\\Users\\<User>\\Downloads\\<your-test-csv>.csv"
+
+#         with open(outside_csv_path, "rb") as f:
+#             csv_file = SimpleUploadedFile("test_csv.csv", f.read(), content_type="text/csv")
+
+#         response = self.client.post(self.url, {"file": csv_file})
+
+#         # Check that the upload succeeded
+#         self.assertEqual(response.status_code, 200)
+#         self.assertIn("stock_names", response.json())
+#         self.assertIn("data", response.json())
+#         print("test_upload_csv_from_outside_project passed!")
+
+#         # Show the first row of data
+#         print ("First row of uploaded CSV data:", response.json()["data"][0])
+
+#     def test_save_to_media_from_outside_project(self):
+#         # Replace this with a real CSV file path on your device
+#         outside_csv_path = r"<drive>\\Users\\<User>\\Downloads\\<your-test-csv>.csv"
+
+#         with open(outside_csv_path, "rb") as f:
+#             csv_file = SimpleUploadedFile("test_csv.csv", f.read(), content_type="text/csv")
+
+#         response = self.client.post(self.url, {"file": csv_file})
+#         self.assertEqual(response.status_code, 200)
+
+#         # Save the uploaded file to the media folder
+#         media_folder = settings.MEDIA_ROOT
+#         os.makedirs(media_folder, exist_ok=True)
+#         uploaded_file_path = os.path.join(media_folder, "test_csv.csv")
+#         with open(uploaded_file_path, "wb") as out_f:
+#             out_f.write(csv_file.read())
+
+#         # Verify the file exists
+#         self.assertTrue(os.path.exists(uploaded_file_path))
+#         print("test_save_to_media_from_outside_project passed!")
+
+#         # Removes the uploaded file after test, comment these 2 lines if you want to keep the file
+#         if os.path.exists(uploaded_file_path):
+#             os.remove(uploaded_file_path)
+
