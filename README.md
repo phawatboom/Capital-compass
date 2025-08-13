@@ -21,11 +21,37 @@ https://drive.google.com/file/d/1aYSvOKf-rMmw-iKoTTLAGJ-eNH6uc5Kg/view?usp=shari
 [![Open in Codespaces](https://classroom.github.com/assets/launch-codespace-2972f46106e565e64193e422d61a12cf1da4916b45550586e14ef0a7c637dd04.svg)](https://classroom.github.com/open-in-codespaces?assignment_repo_id=19989671)
 
 ## Setup Environment
+
+Get into the backend folder:
+
+```bash
+cd backend
+```
+
+### Create a venv:
+
+#### On a Windows system:
+```bash
 python -m venv venv
+```
 
-source venv/bin/activate   # macOS/Linux
+#### Or on macOS/Linux system:
+```bash
+python3 -m venv venv
+```
 
-venv\Scripts\activate      # Windows
+### Then activate the venv:
 
-# Install dependencies
+#### on a Windows system:
+```bash
+venv\Scripts\activate
+```
+
+#### On a macOS/Linux system:
+```bash
+source venv/bin/activate 
+```
+
+
+## Install dependencies
 pip install -r requirements.txt
