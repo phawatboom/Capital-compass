@@ -4,7 +4,6 @@ from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 class CSVUploadTest(TestCase):
-
     def setUp(self):
         self.client = Client()
         # Path to the test CSV file
@@ -16,7 +15,11 @@ class CSVUploadTest(TestCase):
     def test_csv_upload(self):
         # Opens the test CSV
         with open(self.test_csv_path, "rb") as f:
-            csv_file = SimpleUploadedFile("test_returns.csv", f.read(), content_type="text/csv")
+            file_data = f.read()
+            print("=== CSV content ===\n")
+            print(file_data.decode("utf-8"))
+            print("\n===================\n")
+            csv_file = SimpleUploadedFile("test_csv.csv", file_data, content_type="text/csv")
 
         # POSTs the file to the upload endpoint
         response = self.client.post(self.url, {"file": csv_file})
