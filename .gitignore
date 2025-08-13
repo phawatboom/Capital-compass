@@ -1,6 +1,33 @@
-# Ignoring virtual python environment and data file
-.venv
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Virtual envs
+venv/
+.venv/
 env/
-.env
-/webapp/test_data/
+backend/venv/
+
+# Django
+*.sqlite3
+db.sqlite3
+/staticfiles/
 /media/
+/local_settings.py
+
+# Tools & caches
+*.log
+*.pot
+*.pyproj
+.mypy_cache/
+.pytest_cache/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
