@@ -9,6 +9,8 @@
 | Trey Miller-Henry | Web Application |
 | Phawat Saengsiripongpun | Web Application |
 | Charles Benson    | Model/Stats     |
+| Shawna Chandra    | Model/Stats     |
+| Josh Nguyen       | Model/Stats     |
 
 ## Web Application ERD draw.io
 
