@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from .models import Stock, StockData
 
 # This serializer is used to validate the uploaded CSV file.
 def validate_file(value):
@@ -10,3 +11,16 @@ def validate_file(value):
 class CSVUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
 
+# This serializer is used to serialize the Stock model.
+class StockSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Stock
+        fields = '__all__'
+
+# This serializer is used to serialize the StockData model.
+class StockDataSerializer(serializers.Serializer):
+    stock = serializers.SlugRelatedField(slug_field='name', queryset=Stock.objects.all())
+
+    class Meta:
+        model = StockData
+        fields = '__all__'
