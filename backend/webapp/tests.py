@@ -2,7 +2,8 @@ import os
 from django.test import TestCase, Client
 from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.conf import settings
+from .models import Stock, StockData
+from datetime import date
 
 
 class CSVUploadTest(TestCase):
@@ -15,109 +16,104 @@ class CSVUploadTest(TestCase):
         self.url = reverse("upload-csv")
 
     def test_csv_upload(self):
+        # Get the number of Stock and StockData objects before the upload
+        initial_stock_count = Stock.objects.count()
+        initial_stock_data_count = StockData.objects.count()
+        print(f"Initial Stock count: {initial_stock_count}")
+        print(f"Initial StockData count: {initial_stock_data_count}")
+
         # Opens the test CSV
         with open(self.test_csv_path, "rb") as f:
             file_data = f.read()
-            print("=== CSV content ===\n")
-            print(file_data.decode("utf-8"))
-            print("\n===================\n")
             csv_file = SimpleUploadedFile("test_csv.csv", file_data, content_type="text/csv")
 
         # POSTs the file to the upload endpoint
         response = self.client.post(self.url, {"file": csv_file})
 
-        # Checks that the response is 200 OK
-        self.assertEqual(response.status_code, 200)
+        # Checks that the response is 201 CREATED
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json(), {"message": "CSV Uploaded Successfully"})
 
         # Checks that JSON contains keys 'stock_names' and 'data'
-        self.assertIn("stock_names", response.json())
-        self.assertIn("data", response.json())
+        self.assertEqual(Stock.objects.count(), initial_stock_count + 3)
+        self.assertTrue(Stock.objects.filter(name="LYB UN").exists())
+        self.assertTrue(Stock.objects.filter(name="AXP UN").exists())
+        self.assertTrue(Stock.objects.filter(name="VZ UN").exists())
 
-        # Checks first row of data
-        data_row = response.json()["data"][0]
-        self.assertIn("date", data_row)
-        self.assertIn("LYB UN", data_row)
+        # Verify that new StockData objects were created
+        self.assertEqual(StockData.objects.count(), initial_stock_data_count + 9)
 
-    def test_csv_uploads_to_media_folder(self):
-        # Opens the test CSV
+        # Check a few specific data points
+        lyb_stock = Stock.objects.get(name="LYB UN")
+        lyb_data = StockData.objects.get(stock=lyb_stock, date=date(2010, 7, 30))
+        self.assertAlmostEqual(lyb_data.value, 12.34)
+
+        axp_stock = Stock.objects.get(name="AXP UN")
+        axp_data_na = StockData.objects.get(stock=axp_stock, date=date(2010, 8, 2))
+        self.assertIsNone(axp_data_na.value)
+
+
+    def test_invalid_csv_upload(self):
+        # Test with an invalid CSV file
+        invalid_csv = SimpleUploadedFile("invalid.csv", b"not,a,valid,csv", content_type="text/csv")
+        response = self.client.post(self.url, {"file": invalid_csv})
+
+        # Check that the response is 400 BAD REQUEST
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+class StockAPITests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.upload_url = reverse("upload-csv")
+        self.list_url = reverse("stock-list")
+        self.detail_url = "stock-details"  # We'll use this with reverse() later
+
+        # First, upload a valid CSV to populate the database for subsequent tests
+        self.test_csv_path = os.path.join(
+            os.path.dirname(__file__), "test_data", "test_csv.csv"
+        )
         with open(self.test_csv_path, "rb") as f:
             file_data = f.read()
             csv_file = SimpleUploadedFile("test_csv.csv", file_data, content_type="text/csv")
+        self.client.post(self.upload_url, {"file": csv_file})
 
-        # POSTs the file to the upload endpoint
-        response = self.client.post(self.url, {"file": csv_file})
+        # Store a known stock object for later use
+        self.stock_lyb = Stock.objects.get(name="LYB UN")
 
-        # Checks that the response is 200 OK
+    def test_stock_list_view(self):
+        # Tests that the stock_list view returns a list of stocks.
+        response = self.client.get(self.list_url)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 3)  # Expect 3 stocks from the CSV
+        self.assertIn("LYB UN", [stock['name'] for stock in response.json()])
+        self.assertIn("AXP UN", [stock['name'] for stock in response.json()])
+        self.assertIn("VZ UN", [stock['name'] for stock in response.json()])
 
-        # Checks media folder exists
-        os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+    def test_stock_details_view_success(self):
+        # Tests that the stock_details view returns details for a specific stock.
+        # Build the URL with the pk of the stock we know exists
+        url = reverse(self.detail_url, kwargs={'pk': self.stock_lyb.pk})
+        response = self.client.get(url)
 
-        uploaded_file_path = os.path.join(settings.MEDIA_ROOT, "test_csv.csv")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("stock_info", response.json())
+        self.assertIn("data_points", response.json())
+        self.assertEqual(response.json()['stock_info']['name'], "LYB UN")
+        self.assertEqual(len(response.json()['data_points']), 3)  # LYB has 3 data points
 
-        # Save the uploaded file to media folder for testing purposes
-        with open(uploaded_file_path, "wb") as f:
-            f.write(file_data)
+        # Check a specific data point from the response
+        first_data_point = response.json()['data_points'][0]
+        self.assertEqual(first_data_point['date'], "2010-07-30")
+        self.assertAlmostEqual(first_data_point['value'], 12.34)
 
-        # Asserts the file was saved in the media folder
-        self.assertTrue(os.path.exists(uploaded_file_path))
+    def test_stock_details_view_not_found(self):
+        # Tests that the stock_details view returns 404 for a non-existent stock.
+        # Use a primary key that does not exist in the database
+        non_existent_pk = 999
+        url = reverse(self.detail_url, kwargs={'pk': non_existent_pk})
+        response = self.client.get(url)
 
-        # Visual indication that this test passed
-        print("✅ test_csv_uploads_to_media_folder passed!")
+        self.assertEqual(response.status_code, 404)
 
-        # Removes the uploaded file after test, comment these 2 lines if you want to keep the file
-        if os.path.exists(uploaded_file_path):
-            os.remove(uploaded_file_path)
-
-
-# This test simulates uploading a CSV from outside the project directory(e.g. your Downloads folder).
-# To test it, replace the placeholder path with a real path to a CSV file on your computer and uncomment the test.
-
-# class ExternalCSVUploadTest(TestCase):
-#     def setUp(self):
-#         self.client = Client()
-#         self.url = reverse("upload-csv")
-
-#     def test_upload_csv_from_outside_project(self):
-#         # Replace this with a real CSV file path on your device
-#         outside_csv_path = r"<drive>\\Users\\<User>\\Downloads\\<your-test-csv>.csv"
-
-#         with open(outside_csv_path, "rb") as f:
-#             csv_file = SimpleUploadedFile("test_csv.csv", f.read(), content_type="text/csv")
-
-#         response = self.client.post(self.url, {"file": csv_file})
-
-#         # Check that the upload succeeded
-#         self.assertEqual(response.status_code, 200)
-#         self.assertIn("stock_names", response.json())
-#         self.assertIn("data", response.json())
-#         print("test_upload_csv_from_outside_project passed!")
-
-#         # Show the first row of data
-#         print ("First row of uploaded CSV data:", response.json()["data"][0])
-
-#     def test_save_to_media_from_outside_project(self):
-#         # Replace this with a real CSV file path on your device
-#         outside_csv_path = r"<drive>\\Users\\<User>\\Downloads\\<your-test-csv>.csv"
-
-#         with open(outside_csv_path, "rb") as f:
-#             csv_file = SimpleUploadedFile("test_csv.csv", f.read(), content_type="text/csv")
-
-#         response = self.client.post(self.url, {"file": csv_file})
-#         self.assertEqual(response.status_code, 200)
-
-#         # Save the uploaded file to the media folder
-#         media_folder = settings.MEDIA_ROOT
-#         os.makedirs(media_folder, exist_ok=True)
-#         uploaded_file_path = os.path.join(media_folder, "test_csv.csv")
-#         with open(uploaded_file_path, "wb") as out_f:
-#             out_f.write(csv_file.read())
-
-#         # Verify the file exists
-#         self.assertTrue(os.path.exists(uploaded_file_path))
-#         print("test_save_to_media_from_outside_project passed!")
-
-#         # Removes the uploaded file after test, comment these 2 lines if you want to keep the file
-#         if os.path.exists(uploaded_file_path):
-#             os.remove(uploaded_file_path)
 
