@@ -18,7 +18,7 @@ class StockSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 # This serializer is used to serialize the StockData model.
-class StockDataSerializer(serializers.Serializer):
+class StockDataSerializer(serializers.ModelSerializer):
     stock = serializers.SlugRelatedField(slug_field='name', queryset=Stock.objects.all())
 
     class Meta:
