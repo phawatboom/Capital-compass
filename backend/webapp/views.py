@@ -1,12 +1,14 @@
 import csv
 import io
+import os
 from rest_framework.decorators import api_view
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import CSVUploadSerializer, StockSerializer, StockDataSerializer
-from .models import Stock, StockData
+from .serializers import CSVUploadSerializer, StockSerializer, StockDataSerializer, CSVUploadRecordSerializer
+from .models import Stock, StockData, CSVUploadRecord
 from datetime import datetime
+from django.http import FileResponse
 
 
 class CSVUploadView(APIView):
@@ -21,14 +23,16 @@ class CSVUploadView(APIView):
             decoded_file = file.read().decode('utf-8')
             io_string = io.StringIO(decoded_file)
             reader = csv.reader(io_string)
+            # Remove empty rows
+            reader = (row for row in reader if any(cell.strip() for cell in row))
 
             # Skip first 3 lines
             for _ in range(3):
                 next(reader)
 
             # Header row with 'Line#', 'Date', stock names
-            header_row = next(reader)
-            stock_names = header_row[2:]
+            header_row = [cell.strip() for cell in next(reader)]
+            stock_names = [cell.strip() for cell in header_row[2:]]
 
             stocks = {}
             for stock_name in stock_names:
@@ -54,7 +58,17 @@ class CSVUploadView(APIView):
                         date=date_object,
                         defaults={'value': value}
                     )
-            return Response({"message": "CSV Uploaded Successfully"}, status=status.HTTP_201_CREATED)
+
+            upload_record = CSVUploadRecord.objects.create(filename=file)
+
+            return Response({
+                "message": "CSV Uploaded Successfully",
+                "upload": {
+                    "id": upload_record.id,
+                    "filename": upload_record.filename,
+                    "uploaded_at": upload_record.uploaded_at
+                }
+            }, status=status.HTTP_201_CREATED)
 
         except (StopIteration, IndexError) as e:
             # Correctly handle invalid CSV files as a client error (400)
@@ -91,3 +105,21 @@ def stock_details(request, pk):
         "stock_info": stock_serializer.data,
         "data_points": stock_data_serializer.data
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+def list_csv_uploads(request):
+    records = CSVUploadRecord.objects.all().order_by('-uploaded_at')
+    serializer = CSVUploadRecordSerializer(records, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+def download_csv(request, pk):
+    try:
+        upload = CSVUploadRecord.objects.get(pk=pk)
+    except CSVUploadRecord.DoesNotExist:
+        return Response({"error": "File not found"}, status=404)
+
+    return FileResponse(upload.filename.open("rb"), as_attachment=True, filename=os.path.basename(upload.filename.name))
+
