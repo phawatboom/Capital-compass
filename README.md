@@ -55,3 +55,28 @@ source venv/bin/activate
 
 ## Install dependencies
 pip install -r requirements.txt
+
+
+## Frontend (Next.js) Setup in PyCharm
+
+1. Install Node.js (includes npm): https://nodejs.org (Reload after installation)
+```bash
+node -v
+npm -v
+```
+
+2. Go to the frontend directory:
+```bash
+cd frontend
+```
+
+3. Install dependencies:
+```bash
+npm install
+```
+
+4. Start the development server:
+```bash
+npm run dev
+```
+
