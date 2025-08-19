@@ -73,6 +73,7 @@ cd frontend
 3. Install dependencies:
 ```bash
 npm install
+npm install axios
 ```
 
 4. Start the development server:
