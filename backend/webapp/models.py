@@ -17,3 +17,12 @@ class StockData(models.Model):
 
     def __str__(self):
         return f"{self.stock.name} on {self.date}: {self.value}"
+
+
+# This model is used to record the uploaded CSV files.
+class CSVUploadRecord(models.Model):
+    filename = models.FileField(upload_to='csv_uploads/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.filename} ({self.uploaded_at})"
