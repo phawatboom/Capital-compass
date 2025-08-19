@@ -10,3 +10,4 @@ setuptools~=65.5.0
 packaging~=24.1
 djangorestframework~=3.16.1
 pytz~=2024.2
+django-cors-headers>=4.0.0
