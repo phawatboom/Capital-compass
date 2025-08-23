@@ -32,8 +32,10 @@ import {
   getVolatilityInterpretation,
   getScoreZone,
 } from "@/types/analysis"
+import { useParams } from "next/navigation"
 
-export default function StockReport({ params }: { params: { analysisId: string } }) {
+export default function StockReport() {
+  const {analysisId } = useParams<{analysisId: string}>()
   const [analysis, setAnalysis] = useState<AnalysisDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +45,7 @@ export default function StockReport({ params }: { params: { analysisId: string }
     const fetchAnalysis = async () => {
       try {
         setLoading(true)
-        const data = await getAnalysis(params.analysisId)
+        const data = await getAnalysis(analysisId)
         setAnalysis(data)
 
         // Set default lookback to the first available
@@ -60,10 +62,10 @@ export default function StockReport({ params }: { params: { analysisId: string }
     }
 
     fetchAnalysis()
-  }, [params.analysisId])
+  }, [analysisId])
 
   const handleDownloadPdf = () => {
-    window.open(getPdfReportUrl(params.analysisId), "_blank")
+    window.open(getPdfReportUrl(analysisId), "_blank")
   }
 
   if (loading) {
