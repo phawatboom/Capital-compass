@@ -119,6 +119,14 @@ else:
     raise ValueError(f"Unsupported DB_ENGINE: {DB_ENGINE}. Supported engines are 'postgres' and 'sqlite'.")
 
 
+# Loading media directory from env
+MEDIA_URL = "/media/"
+
+if DB_ENGINE == 'sqlite':
+    MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
+elif DB_ENGINE == 'postgres':
+    MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "db-media")))
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 

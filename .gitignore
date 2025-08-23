@@ -11,16 +11,18 @@ env/
 backend/venv/
 
 #environment variables
-
 .env
-
 
 # Django
 *.sqlite3
 db.sqlite3
 /staticfiles/
-/media/
 /local_settings.py
+
+
+# Media (user uploads)
+backend/media/
+backend/db-media/
 
 # Tools & caches
 *.log
