@@ -74,22 +74,41 @@ REST_FRAMEWORK = {
     )
 }
 
-SESSION_COOKIE_SECURE = True          # False only on localhost without HTTPS
-CSRF_COOKIE_SECURE = True             # False only on localhost without HTTPS
-SESSION_COOKIE_SAMESITE = "Lax"       # "Strict" if same-site only
-CSRF_COOKIE_SAMESITE = "Lax"
+if DEBUG:
+    # Dev: running over HTTP from localhost
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 
-# If frontend is on a different origin (e.g., https://app.example.com) calling the API:
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "https://app.example.com",        # <-- your Next.js origin(s)
-]
-CSRF_TRUSTED_ORIGINS = [
-    "https://app.example.com",        # <-- must include scheme
-]
+    SESSION_COOKIE_SECURE = False     # ok in dev (HTTP)
+    CSRF_COOKIE_SECURE = False
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
 
-# DEV ONLY convenience (remove in prod):
-# CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+    # Optional last-resort during early bring-up (remove once things work):
+    # CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # Prod: HTTPS, explicit origins only
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SAMESITE = "Lax"   # or "Strict" if truly same-site
+    CSRF_COOKIE_SAMESITE = "Lax"
+
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_ALLOWED_ORIGINS = [
+        "https://capitalcompass.com",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
+        "https://capitalcompass.com",
+    ]
 
 
 ROOT_URLCONF = 'backend.urls'
