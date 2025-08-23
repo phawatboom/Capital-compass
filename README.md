@@ -113,6 +113,8 @@ cd frontend
 
 #### Start the Next.js development server:
 ```bash
-npm run dev
+pnpm run dev
+#switch to use pnpm instead because it is faster
+#npm run dev
 ```
 #### The frontend will run at http://localhost:3000/
