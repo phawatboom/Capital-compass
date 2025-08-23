@@ -23,6 +23,8 @@ db.sqlite3
 # Media (user uploads)
 backend/media/
 backend/db-media/
+backend/backend/media/
+backend/backend/db-media/
 
 # Tools & caches
 *.log
