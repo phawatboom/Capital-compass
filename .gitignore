@@ -19,7 +19,6 @@ db.sqlite3
 /staticfiles/
 /local_settings.py
 
-
 # Media (user uploads)
 backend/media/
 backend/db-media/
