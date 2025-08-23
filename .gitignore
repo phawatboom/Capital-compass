@@ -10,6 +10,11 @@ venv/
 env/
 backend/venv/
 
+#environment variables
+
+.env
+
+
 # Django
 *.sqlite3
 db.sqlite3
