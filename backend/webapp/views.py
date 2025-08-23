@@ -4,13 +4,16 @@ import io
 import os
 from datetime import datetime
 
+from django.contrib.auth import authenticate, login, logout
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.http import FileResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -22,7 +25,18 @@ from .serializers import (
     CSVUploadRecordSerializer,
 )
 
+
+# --- CSRF bootstrap ---
+@api_view(["GET"])
+@ensure_csrf_cookie
+@permission_classes([AllowAny])
+def csrf(request):
+    return Response({"detail": "CSRF cookie set"})
+
+
+
 class CSVUploadView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request, *args, **kwargs):
         serializer = CSVUploadSerializer(data=request.data)
         if not serializer.is_valid():
@@ -94,6 +108,7 @@ class CSVUploadView(APIView):
 
 # List all stocks.
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def stock_list(request):
     stocks = Stock.objects.all()
     serializer = StockSerializer(stocks, many=True)
@@ -102,6 +117,7 @@ def stock_list(request):
 
 # Retrieve details and all data points for a specific stock.
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def stock_details(request, pk):
     try:
         stock = Stock.objects.get(pk=pk)
@@ -119,6 +135,7 @@ def stock_details(request, pk):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def list_csv_uploads(request):
     records = CSVUploadRecord.objects.all().order_by('-uploaded_at')
     serializer = CSVUploadRecordSerializer(records, many=True)
@@ -126,6 +143,7 @@ def list_csv_uploads(request):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def download_csv(request, pk):
     try:
         upload = CSVUploadRecord.objects.get(pk=pk)
@@ -136,52 +154,55 @@ def download_csv(request, pk):
 
 
 
+
+
 # 2. Authentication and Permissions
 
-@api_view(['POST'])
-def register_user(request):
-    '''
-    Register a new user with username, password, and optional email.
-    '''
-    username = request.data.get('username')
-    password = request.data.get('password')
-    email = request.data.get('email', '')
-
-    if not username or not password:
-        return Response({"error": "Username and password are required"},
-                        status=status.HTTP_400_BAD_REQUEST)
-
-    if User.objects.filter(username=username).exists():
-        return Response({"error": "Username already exists"},
-                        status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        validate_password(password)
-        User.objects.create_user(username=username, password=password, email=email)
-        return Response({"success": "User created successfully"},
-                        status=status.HTTP_201_CREATED)
-    except ValidationError as e:
-        return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# --- CSRF bootstrap ---
+@api_view(["GET"])
+@ensure_csrf_cookie
+@permission_classes([AllowAny])
+def csrf(request):
+    return Response({"detail": "CSRF cookie set"})
 
-api_view(['POST'])
+
+# --- Login (creates server-side session + sets sessionid cookie) ---
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def login_user(request):
-    '''
-    Authenticate a user with username and password.
-    Returns a token if successful.
-    '''
-    username = request.data.get('username')
-    password = request.data.get('password')
-
+    username = request.data.get("username")
+    password = request.data.get("password")
     if not username or not password:
-        return Response({"error": "Username and password are required"},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": "Username and password are required"}, status=400)
 
     user = authenticate(request, username=username, password=password)
-    if user is not None:
-        token, created = Token.objects.get_or_create(user=user)
-        return Response({"token": token.key}, status=status.HTTP_200_OK)
-    else:
-        return Response({"error": "Invalid credentials"},
-                        status=status.HTTP_401_UNAUTHORIZED)
+    if user is None:
+        return Response({"error": "Invalid credentials"}, status=401)
+
+    login(request, user)  # sets session
+    return Response({"detail": "ok"})
+
+
+# --- Logout (clears session) ---
+@api_view(["POST"])
+def logout_user(request):
+    logout(request)
+    return Response({"detail": "logged out"})
+
+
+# --- Who am I (for frontend to read role or user state) ---
+@api_view(["GET"])
+def me(request):
+    u = request.user
+    return Response({
+        "authenticated": u.is_authenticated,
+        "username": u.username if u.is_authenticated else None,
+        "is_staff": u.is_staff if u.is_authenticated else False,
+        "is_superuser": u.is_superuser if u.is_authenticated else False,
+        "is_moderator": (
+            u.groups.filter(name="mods").exists() or
+            u.has_perm("webapp.can_moderate")
+        ) if u.is_authenticated else False,
+    })

@@ -48,8 +48,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework_simplejwt',
-    'rest_framework.authtoken',
     'rest_framework',
     'corsheaders',
     'webapp',
@@ -69,21 +67,34 @@ MIDDLEWARE = [
 # Add REST Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
     )
 }
 
-# JWT settings
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-}
+SESSION_COOKIE_SECURE = True          # False only on localhost without HTTPS
+CSRF_COOKIE_SECURE = True             # False only on localhost without HTTPS
+SESSION_COOKIE_SAMESITE = "Lax"       # "Strict" if same-site only
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# If frontend is on a different origin (e.g., https://app.example.com) calling the API:
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://app.example.com",        # <-- your Next.js origin(s)
+]
+CSRF_TRUSTED_ORIGINS = [
+    "https://app.example.com",        # <-- must include scheme
+]
+
+# DEV ONLY convenience (remove in prod):
+# CORS_ALLOW_ALL_ORIGINS = True
+
 
 ROOT_URLCONF = 'backend.urls'
 
-#For dev purposes, allow all origins for CORS, remove in production
-CORS_ALLOW_ALL_ORIGINS = True
+
 
 TEMPLATES = [
     {
