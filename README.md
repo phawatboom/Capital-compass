@@ -87,7 +87,7 @@ pip install -r requirements.txt
 ```
 
 ### 3. Set Up the Database
-Ensure the migration files are located in the backend/migrations folder. Then, run the following commands to apply migrations and set up the database:
+Ensure the migration files are located in the webapp/migrations folder. Then, run the following commands to apply migrations and set up the database:
 
 ```
 python manage.py migrate
