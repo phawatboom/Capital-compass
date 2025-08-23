@@ -19,11 +19,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CURRENT_DIR = Path(__file__).resolve().parent
 
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-
-
 # Load environment variables from .env file
+# SECURITY WARNING: don't run with debug turned on in production!
 env = environ.Env()
 environ.Env.read_env(CURRENT_DIR / '.env')
 SECRET_KEY = env("SECRET_KEY")
@@ -33,11 +30,9 @@ DEBUG = env.bool("DEBUG")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: don't run with debug turned on in production!
 
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ["127.0.0.1", "localhost",]
 
 # Application definition
 
