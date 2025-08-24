@@ -1,33 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
+import api from "./lib/api";
+import { ensureAuthed } from "./lib/ensureAuth";
 
 export default function Home() {
-  const [file, setFile] = useState(null);
-  const [message, setMessage] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    // make sure csrftoken exists
+    api.get("/auth/csrf/");
+  }, []);
 
   const handleUpload = async () => {
     if (!file) return;
+
+    // Require login before attempting upload
+    if (!(await ensureAuthed("/"))) return;
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      const response = await axios.post(
-        "http://127.0.0.1:8000/api/upload-csv/",
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      );
-      setMessage({ text: response.data.message, type: "success" });
-    } catch (err) {
+      const res = await api.post("/upload-csv/", formData);
+      setMessage({ text: res.data.message, type: "success" });
+    } catch (err: any) {
       setMessage({
-        text: err.response?.data?.error || "Upload failed",
+        text: err?.response?.data?.error || "Upload failed",
         type: "error",
       });
     }
+  };
+
+  const goToUploads = async () => {
+    if (!(await ensureAuthed("/uploads"))) return;
+    router.push("/uploads");
   };
 
   return (
@@ -40,7 +50,7 @@ export default function Home() {
           borderRadius: "8px",
         }}
       >
-        <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files[0])} />
+        <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </div>
 
       <button
@@ -65,8 +75,7 @@ export default function Home() {
             padding: "0.5rem",
             borderRadius: "5px",
             color: "white",
-            backgroundColor:
-              message.type === "success" ? "green" : message.type === "error" ? "red" : "gray",
+            backgroundColor: message.type === "success" ? "green" : "red",
           }}
         >
           {message.text}
@@ -75,7 +84,7 @@ export default function Home() {
 
       <div style={{ marginTop: "2rem" }}>
         <button
-          onClick={() => router.push("/uploads")}
+          onClick={goToUploads}
           style={{
             backgroundColor: "gray",
             color: "white",
@@ -91,4 +100,3 @@ export default function Home() {
     </div>
   );
 }
-
