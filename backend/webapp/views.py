@@ -184,6 +184,25 @@ def login_user(request):
     login(request, user)  # sets session
     return Response({"detail": "ok"})
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def register_user(request):
+    username = request.data.get("username")
+    password = request.data.get("password")
+    if not username or not password:
+        return Response({"error": "Username and password are required"}, status=400)
+
+    if User.objects.filter(username=username).exists():
+        return Response({"error": "Username already taken"}, status=400)
+
+    try:
+        validate_password(password)
+    except ValidationError as e:
+        return Response({"errors": e.messages}, status=400)
+
+    User.objects.create_user(username=username, password=password)
+    return Response({"detail": "User created"}, status=201)
+
 
 # --- Logout (clears session) ---
 @api_view(["POST"])

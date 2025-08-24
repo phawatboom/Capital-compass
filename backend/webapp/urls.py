@@ -1,15 +1,14 @@
 from django.urls import path
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
-
 from .views import (
     CSVUploadView,
     stock_list,
     stock_details,
     list_csv_uploads,
     download_csv,
+    csrf, register_user,
+    login_user,
+    logout_user,
+    me
 )
 
 # this is the URL configuration for the webapp app
@@ -20,6 +19,10 @@ urlpatterns = [
     path('csv-uploads/', list_csv_uploads, name='list-csv-uploads'),
     path('csv-uploads/<int:pk>/download/', download_csv, name='download-csv'),
     #auth
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    # Auth/session endpoints
+    path('auth/csrf/', csrf, name='csrf'),
+    path('auth/register/', register_user, name='register'),
+    path('auth/login/', login_user, name='login'),
+    path('auth/logout/', logout_user, name='logout'),
+    path('auth/me/', me, name='me'),
 ]
