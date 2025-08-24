@@ -15,8 +15,8 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
     }
   }, [loading, me.authenticated, pathname, router]);
 
-  if (loading) return null;               // or a spinner
-  if (!me.authenticated) return null;     // we will redirect
+  if (loading) return null;
+  if (!me.authenticated) return null;
 
   return <>{children}</>;
 }
