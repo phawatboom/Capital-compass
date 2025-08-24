@@ -31,8 +31,31 @@ export default function LoginPage() {
     <div style={{ padding: "2rem", maxWidth: 400 }}>
       <h1>Login</h1>
       <form onSubmit={onSubmit}>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" />
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
+                <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Username"
+          style={{
+            display: "block",
+            marginBottom: 12,
+            padding: "8px",
+            width: "100%",
+            boxSizing: "border-box",
+          }}
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          style={{
+            display: "block",
+            marginBottom: 12,
+            padding: "8px",
+            width: "100%",
+            boxSizing: "border-box",
+          }}
+        />
         <button type="submit" style={{ marginTop: 12 }}>Sign in</button>
       </form>
       {msg && <p style={{ color: "red" }}>{msg}</p>}

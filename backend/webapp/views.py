@@ -1,4 +1,3 @@
-# file: backend/webapp/views.py
 import csv
 import io
 import os
@@ -24,14 +23,6 @@ from .serializers import (
     StockDataSerializer,
     CSVUploadRecordSerializer,
 )
-
-
-# --- CSRF bootstrap ---
-@api_view(["GET"])
-@ensure_csrf_cookie
-@permission_classes([AllowAny])
-def csrf(request):
-    return Response({"detail": "CSRF cookie set"})
 
 
 
