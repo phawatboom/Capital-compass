@@ -103,18 +103,22 @@ python manage.py runserver
 The server will start at http://127.0.0.1:8000/.
 
 
-## Frontend (Next.js) Setup in PyCharm
 
-1. Install Node.js (includes npm): https://nodejs.org (Reload after installation)
-```bash
-node -v
-npm -v
+### Frontend Setup
+
+## Create a `.env` File
+
+Create a `.env` file in the `./frontend` folder with the following format:
+
+```env
+REACT_APP_BASE_API_URL=
 ```
 
-2. Go to the frontend directory:
-```bash
-cd frontend
-```
+And pass http://127.0.0.1:8000/api as a value to it if you are developing, or any other local server you are running the backend on.
+
+
+
+Then, in the `./frontend` folder, run these commands to install the packages required and run the React app
 
 3. Install dependencies:
 ```bash
@@ -127,4 +131,4 @@ npm install axios
 npm run dev
 ```
 
-#### The frontend will run at http://localhost:3000/
+#### The frontend will run at http://127.0.0.1:3000/
