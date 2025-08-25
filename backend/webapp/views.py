@@ -34,9 +34,8 @@ def csrf(request):
     return Response({"detail": "CSRF cookie set"})
 
 
-
 class CSVUploadView(APIView):
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
     def post(self, request, *args, **kwargs):
         serializer = CSVUploadSerializer(data=request.data)
         if not serializer.is_valid():
@@ -108,7 +107,7 @@ class CSVUploadView(APIView):
 
 # List all stocks.
 @api_view(['GET'])
-@permission_classes([AllowAny])
+# @permission_classes([AllowAny])
 def stock_list(request):
     stocks = Stock.objects.all()
     serializer = StockSerializer(stocks, many=True)
@@ -117,7 +116,7 @@ def stock_list(request):
 
 # Retrieve details and all data points for a specific stock.
 @api_view(['GET'])
-@permission_classes([AllowAny])
+# @permission_classes([AllowAny])
 def stock_details(request, pk):
     try:
         stock = Stock.objects.get(pk=pk)
@@ -135,7 +134,7 @@ def stock_details(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+# @permission_classes([IsAuthenticated])
 def list_csv_uploads(request):
     records = CSVUploadRecord.objects.all().order_by('-uploaded_at')
     serializer = CSVUploadRecordSerializer(records, many=True)
@@ -143,7 +142,7 @@ def list_csv_uploads(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+# @permission_classes([IsAuthenticated])
 def download_csv(request, pk):
     try:
         upload = CSVUploadRecord.objects.get(pk=pk)
@@ -160,49 +159,49 @@ def download_csv(request, pk):
 
 
 
-# --- CSRF bootstrap ---
-@api_view(["GET"])
-@ensure_csrf_cookie
-@permission_classes([AllowAny])
-def csrf(request):
-    return Response({"detail": "CSRF cookie set"})
-
-
-# --- Login (creates server-side session + sets sessionid cookie) ---
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def login_user(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
-    if not username or not password:
-        return Response({"error": "Username and password are required"}, status=400)
-
-    user = authenticate(request, username=username, password=password)
-    if user is None:
-        return Response({"error": "Invalid credentials"}, status=401)
-
-    login(request, user)  # sets session
-    return Response({"detail": "ok"})
-
-
-# --- Logout (clears session) ---
-@api_view(["POST"])
-def logout_user(request):
-    logout(request)
-    return Response({"detail": "logged out"})
-
-
-# --- Who am I (for frontend to read role or user state) ---
-@api_view(["GET"])
-def me(request):
-    u = request.user
-    return Response({
-        "authenticated": u.is_authenticated,
-        "username": u.username if u.is_authenticated else None,
-        "is_staff": u.is_staff if u.is_authenticated else False,
-        "is_superuser": u.is_superuser if u.is_authenticated else False,
-        "is_moderator": (
-            u.groups.filter(name="mods").exists() or
-            u.has_perm("webapp.can_moderate")
-        ) if u.is_authenticated else False,
-    })
+# # --- CSRF bootstrap ---
+# @api_view(["GET"])
+# @ensure_csrf_cookie
+# @permission_classes([AllowAny])
+# def csrf(request):
+#     return Response({"detail": "CSRF cookie set"})
+#
+#
+# # --- Login (creates server-side session + sets sessionid cookie) ---
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def login_user(request):
+#     username = request.data.get("username")
+#     password = request.data.get("password")
+#     if not username or not password:
+#         return Response({"error": "Username and password are required"}, status=400)
+#
+#     user = authenticate(request, username=username, password=password)
+#     if user is None:
+#         return Response({"error": "Invalid credentials"}, status=401)
+#
+#     login(request, user)  # sets session
+#     return Response({"detail": "ok"})
+#
+#
+# # --- Logout (clears session) ---
+# @api_view(["POST"])
+# def logout_user(request):
+#     logout(request)
+#     return Response({"detail": "logged out"})
+#
+#
+# # --- Who am I (for frontend to read role or user state) ---
+# @api_view(["GET"])
+# def me(request):
+#     u = request.user
+#     return Response({
+#         "authenticated": u.is_authenticated,
+#         "username": u.username if u.is_authenticated else None,
+#         "is_staff": u.is_staff if u.is_authenticated else False,
+#         "is_superuser": u.is_superuser if u.is_authenticated else False,
+#         "is_moderator": (
+#             u.groups.filter(name="mods").exists() or
+#             u.has_perm("webapp.can_moderate")
+#         ) if u.is_authenticated else False,
+#     })
