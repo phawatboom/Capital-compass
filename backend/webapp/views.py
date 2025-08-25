@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Stock, StockData, CSVUploadRecord
-from datetime import datetime
+from datetime import date, datetime
 from django.http import FileResponse
 
 from .serializers import (
