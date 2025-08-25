@@ -7,9 +7,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from .serializers import CSVUploadSerializer, StockSerializer, StockDataSerializer, CSVUploadRecordSerializer
 from .models import Stock, StockData, CSVUploadRecord
-from datetime import datetime
+from datetime import date, datetime
 from django.http import FileResponse
 
+def _parse_date(date_str: str) -> date:
+    date_str = date_str.strip()
+    for fmt in ("%d-%b-%Y", "%d-%b-%y", "%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            pass
+    raise ValueError(f"time data '{date_str}' does not match expected formats")
 
 class CSVUploadView(APIView):
     def post(self, request, *args, **kwargs):
@@ -41,7 +49,11 @@ class CSVUploadView(APIView):
 
             for row in reader:
                 date_str = row[1]
-                date_object = datetime.strptime(date_str, '%d-%b-%Y').date()
+                try:
+                    date_object = _parse_date(date_str)
+
+                except ValueError as e:
+                    return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
                 for stock_name, value_str in zip(stock_names, row[2:]):
                     value = None
