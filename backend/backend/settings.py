@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 import os
 from pathlib import Path
+from datetime import timedelta
 import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -18,11 +19,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CURRENT_DIR = Path(__file__).resolve().parent
 
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-
-
 # Load environment variables from .env file
+# SECURITY WARNING: don't run with debug turned on in production!
 env = environ.Env()
 environ.Env.read_env(CURRENT_DIR / '.env')
 SECRET_KEY = env("SECRET_KEY")
@@ -34,12 +32,7 @@ DEBUG = env.bool("DEBUG")
 
 
 
-
-# SECURITY WARNING: don't run with debug turned on in production!
-
-
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ["127.0.0.1", "localhost",]
 
 # Application definition
 
@@ -66,10 +59,70 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+
+if DEBUG:
+    REST_FRAMEWORK = {
+        'DEFAULT_AUTHENTICATION_CLASSES': (
+            'rest_framework.authentication.SessionAuthentication',
+        ),
+        # Open everything in dev so the frontend is unblocked
+        'DEFAULT_PERMISSION_CLASSES': (
+            'rest_framework.permissions.AllowAny',
+        ),
+    }
+else:
+    REST_FRAMEWORK = {
+        'DEFAULT_AUTHENTICATION_CLASSES': (
+            'rest_framework.authentication.SessionAuthentication',
+        ),
+        # Lock down in prod
+        'DEFAULT_PERMISSION_CLASSES': (
+            'rest_framework.permissions.IsAuthenticated',
+        ),
+    }
+
+
+
+if DEBUG:
+    # Dev: running over HTTP from localhost
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
+
+    SESSION_COOKIE_SECURE = False     # ok in dev (HTTP)
+    CSRF_COOKIE_SECURE = False
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
+
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+    # Optional last-resort during early bring-up (remove once things work):
+    # CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # Prod: HTTPS, explicit origins only
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SAMESITE = "Lax"   # or "Strict" if truly same-site
+    CSRF_COOKIE_SAMESITE = "Lax"
+
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_ALLOWED_ORIGINS = [
+        "https://capitalcompass.com",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
+        "https://capitalcompass.com",
+    ]
+
+
 ROOT_URLCONF = 'backend.urls'
 
-#For dev purposes, allow all origins for CORS, remove in production
-CORS_ALLOW_ALL_ORIGINS = True
+
 
 TEMPLATES = [
     {
