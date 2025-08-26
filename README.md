@@ -127,4 +127,40 @@ npm install axios
 npm run dev
 ```
 
+## Testing CSV Upload and Download Features
+
+### 1. Start the Backend
+#### Open a Git Bash terminal and navigate to the backend folder:
+```bash
+cd backend
+```
+
+#### Activate the virtual environment:
+###### on a Windows system:
+```bash
+venv\Scripts\activate
+```
+
+###### On a macOS/Linux system:
+```bash
+source venv/bin/activate 
+```
+
+#### Run the Django development server:
+```bash
+python manage.py runserver
+```
+
+### 2. Start the Frontend
+#### Open a second Git Bash terminal and navigate to the frontend folder:
+```bash
+cd frontend
+```
+
+#### Start the Next.js development server:
+```bash
+pnpm run dev
+#switch to use pnpm instead because it is faster
+#npm run dev
+```
 #### The frontend will run at http://localhost:3000/
