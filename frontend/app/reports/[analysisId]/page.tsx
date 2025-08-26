@@ -431,11 +431,15 @@ export default function StockReport() {
                   />
                   <YAxis domain={[-0.8, 0.8]} tick={{ fontSize: 11 }} stroke="#666" />
                   <RechartsTooltip
-                    formatter={(value: number, name: string) => [
-                      value.toFixed(3),
-                      name.includes("30d") ? "30d Serial Corr" : "60d Serial Corr",
-                    ]}
-                  />
+                      formatter={(value: number, name: string) => {
+                        if (name.startsWith("ci_")) return null; // hide confidence interval lines
+                        return [
+                          Number(value).toFixed(3),
+                          name.includes("30d") ? "30d Serial Corr" : "60d Serial Corr",
+                        ];
+                      }}
+                    />
+
                   <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="1 1" strokeWidth={1} />
                   <ReferenceLine y={0.2} stroke="#ef4444" strokeDasharray="2 2" strokeWidth={1} />
                   <ReferenceLine y={-0.2} stroke="#3b82f6" strokeDasharray="2 2" strokeWidth={1} />
