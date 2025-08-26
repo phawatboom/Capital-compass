@@ -23,6 +23,7 @@ import {
   Scatter,
   ErrorBar,
   ComposedChart,
+  Cell,
 } from "recharts"
 import { getAnalysis, getPdfReportUrl } from "@/lib/mockApi"
 import {
@@ -509,12 +510,17 @@ export default function StockReport() {
                     }}
                   />
                   <ReferenceLine x={0} stroke="#6b7280" strokeDasharray="1 1" strokeWidth={1} />
-                  <Scatter
-                    dataKey="volatility"
-                    fill={(entry: any) => (entry.isCurrentStock ? "#dc2626" : "#3b82f6")}
-                    stroke={(entry: any) => (entry.isCurrentStock ? "#991b1b" : "#1e40af")}
-                    strokeWidth={2}
-                  />
+                  <Scatter data={analysis.volatility_peers}>
+                    {analysis.volatility_peers.map((entry: any, i: number) => (
+                      <Cell
+                        key={i}
+                        fill={entry.isCurrentStock ? "#dc2626" : "#3b82f6"}
+                        stroke={entry.isCurrentStock ? "#991b1b" : "#1e40af"}
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </Scatter>
+
                 </ScatterChart>
               </ResponsiveContainer>
             </div>
