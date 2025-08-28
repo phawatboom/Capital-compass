@@ -2,20 +2,19 @@ import csv
 import io
 import os
 from datetime import datetime
-
+import pandas as pd
 from django.contrib.auth import authenticate, login, logout
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.http import FileResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from rest_framework.parsers import MultiPartParser, FormParser
 from .models import Stock, StockData, CSVUploadRecord
 from .serializers import (
     CSVUploadSerializer,
@@ -25,76 +24,231 @@ from .serializers import (
 )
 
 
+# Helper function to process a single DataFrame (from CSV or Excel sheet)
+def process_data(df, file, data_type, upload_record):
+    # Common processing logic for different data types
+    try:
+        # ---- Logic for Prices sheet ----
+        if 'line#' in df.iloc[3].astype(str).str.lower().values and data_type == 'price':
+            header_row_index = 3
+            date_col_index = 1
+            stock_names_start_index = 2
 
-class CSVUploadView(APIView):
-    permission_classes = [IsAuthenticated]
-    def post(self, request, *args, **kwargs):
-        serializer = CSVUploadSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
+            stock_names = [name.strip() for name in header_series.dropna().tolist() if
+                           name.strip() and 'un' in name.lower()]
 
-        file = serializer.validated_data['file']
+            if not stock_names:
+                raise ValueError("No stock names found in header.")
 
-        try:
-            decoded_file = file.read().decode('utf-8')
-            io_string = io.StringIO(decoded_file)
-            reader = csv.reader(io_string)
-            # Remove empty rows
-            reader = (row for row in reader if any(cell.strip() for cell in row))
+            stocks = {name: Stock.objects.get_or_create(name=name)[0] for name in stock_names}
 
-            # Skip first 3 lines
-            for _ in range(3):
-                next(reader)
+            data_df = df.iloc[header_row_index + 1:].reset_index(drop=True)
+            for _, row in data_df.iterrows():
+                try:
+                    date_str = str(row.iloc[date_col_index]).strip()
+                    if not date_str:
+                        continue
+                    try:
+                        date_object = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    except ValueError:
+                        date_object = datetime.strptime(date_str, '%d-%b-%Y').date()
+                except (IndexError, ValueError):
+                    continue
 
-            # Header row with 'Line#', 'Date', stock names
-            header_row = [cell.strip() for cell in next(reader)]
-            stock_names = [cell.strip() for cell in header_row[2:]]
-
-            stocks = {}
-            for stock_name in stock_names:
-                stock_obj, created = Stock.objects.get_or_create(name=stock_name)
-                stocks[stock_name] = stock_obj
-
-            for row in reader:
-                date_str = row[1]
-                date_object = datetime.strptime(date_str, '%d-%b-%Y').date()
-
-                for stock_name, value_str in zip(stock_names, row[2:]):
+                for i, stock_name in enumerate(stock_names):
+                    value_raw = row.iloc[stock_names_start_index + i]
                     value = None
-                    if value_str.strip() != "#N/A":
-                        try:
-                            value = float(value_str)
-                        except (ValueError, IndexError):
-                            # Skip this data point if the value is invalid
-                            continue
+
+                    if isinstance(value_raw, (int, float)):
+                        value = value_raw
+                    elif isinstance(value_raw, str):
+                        value_str = value_raw.strip()
+                        if value_str not in ["#N/A", ""]:
+                            try:
+                                value = float(value_str)
+                            except ValueError:
+                                continue
 
                     stock_obj = stocks[stock_name]
                     StockData.objects.update_or_create(
                         stock=stock_obj,
                         date=date_object,
+                        data_type=data_type,
                         defaults={'value': value}
                     )
 
-            upload_record = CSVUploadRecord.objects.create(filename=file)
+        # ---- Logic for Returns sheet ----
+        if 'date' in df.iloc[5].astype(str).str.lower().values and data_type == 'return':
+            header_row_index = 5
+            date_col_index = 0
+            stock_names_start_index = 1
 
-            return Response({
-                "message": "CSV Uploaded Successfully",
-                "upload": {
-                    "id": upload_record.id,
-                    "filename": upload_record.filename,
-                    "uploaded_at": upload_record.uploaded_at
-                }
-            }, status=status.HTTP_201_CREATED)
+            header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
+            stock_names = [name.strip() for name in header_series.dropna().tolist() if
+                           name.strip() and 'un' in name.lower()]
 
-        except (StopIteration, IndexError) as e:
-            # Correctly handle invalid CSV files as a client error (400)
-            return Response({"error": "Invalid CSV file. Check header and row counts."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            if not stock_names:
+                raise ValueError("No stock names found in header.")
 
-        except Exception as e:
-            # Catch other unexpected errors and return a 500
-            return Response({"error": f"An unexpected error occurred: {e}"},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            stocks = {name: Stock.objects.get_or_create(name=name)[0] for name in stock_names}
+
+            data_df = df.iloc[header_row_index + 1:].reset_index(drop=True)
+            for _, row in data_df.iterrows():
+                try:
+                    date_str = str(row.iloc[date_col_index]).strip()
+                    if not date_str:
+                        continue
+                    try:
+                        date_object = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    except ValueError:
+                        date_object = datetime.strptime(date_str, '%d-%b-%Y').date()
+                except (IndexError, ValueError):
+                    continue
+
+                for i, stock_name in enumerate(stock_names):
+                    value_raw = row.iloc[stock_names_start_index + i]
+                    value = None
+
+                    if isinstance(value_raw, str):
+                        value_str = value_raw.strip()
+                        if value_str not in ["#N/A", ""]:
+                            if '%' in value_str:
+                                value = float(value_str.strip('%')) / 100.0
+                            else:
+                                try:
+                                    value = float(value_str)
+                                except ValueError:
+                                    continue
+
+                    stock_obj = stocks[stock_name]
+                    StockData.objects.update_or_create(
+                        stock=stock_obj,
+                        date=date_object,
+                        data_type=data_type,
+                        defaults={'value': value}
+                    )
+
+        # ---- Logic for BQL Query sheet ----
+        if 'dates' in df.iloc[1].astype(str).str.lower().values and data_type == 'equity':
+            header_row_index = 0
+            date_col_index = 0
+            stock_names_start_index = 1
+            data_start_row_index = 2
+            # Look for 'un equity' in stock names
+            header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
+            stock_names = [name.strip() for name in header_series.dropna().tolist() if
+                           name.strip() and 'un equity' in name.lower()]
+
+            if not stock_names:
+                raise ValueError("No stock names found in header.")
+            # Remove ' Equity' suffix if present
+            cleaned_stock_names = [name.replace(' Equity', '') for name in stock_names]
+            stocks = {name: Stock.objects.get_or_create(name=name)[0] for name in cleaned_stock_names}
+
+            data_df = df.iloc[data_start_row_index:].reset_index(drop=True)
+            for _, row in data_df.iterrows():
+                try:
+                    date_str = str(row.iloc[date_col_index]).strip()
+                    if not date_str:
+                        continue
+                    try:
+                        date_object = datetime.strptime(date_str, '%d/%m/%Y').date()
+                    except ValueError:
+                        date_object = datetime.strptime(date_str, '%Y-%m-%d').date()
+                except (IndexError, ValueError):
+                    continue
+
+                for i, stock_name in enumerate(cleaned_stock_names):
+                    value_raw = row.iloc[stock_names_start_index + i]
+                    value = None
+
+                    if isinstance(value_raw, (int, float)):
+                        value = value_raw
+                    elif isinstance(value_raw, str):
+                        value_str = value_raw.strip()
+                        if value_str not in ["#N/A", ""]:
+                            try:
+                                value = float(value_str)
+                            except ValueError:
+                                continue
+
+                    stock_obj = stocks[stock_name]
+                    StockData.objects.update_or_create(
+                        stock=stock_obj,
+                        date=date_object,
+                        data_type=data_type,
+                        defaults={'value': value}
+                    )
+
+    except Exception as e:
+        raise Exception(f"Failed to process {file.name}, data type: {data_type}. Error: {e}")
+
+# View to handle file uploads
+# --------------------------------------------------------------------------------------
+class FileUploadView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        file_obj = request.data.get('file')
+
+        if not file_obj:
+            return Response({'error': 'No file was provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = CSVUploadSerializer(data={'filename': file_obj})
+        if serializer.is_valid():
+            upload_record = None
+            try:
+                upload_record = serializer.save()
+                file_path = upload_record.filename.path
+
+                # Handle XLSX files with multiple sheets
+                if file_path.endswith('.xlsx'):
+                    sheets_to_process = {
+                        'Prices': 'price',
+                        'Returns': 'return',
+                    }
+                    with pd.ExcelFile(file_path) as xls:
+                        print(f"Available sheets: {xls.sheet_names}")  # Add this debug line
+                        for sheet_name, data_type in sheets_to_process.items():
+                            if sheet_name in xls.sheet_names:
+                                print(f"Processing sheet: {sheet_name}")  # Add this debug line
+                                df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+                                process_data(df, file_obj, data_type, upload_record)
+
+                # Handle CSV files
+                elif file_path.endswith('.csv'):
+                    df = pd.read_csv(file_path, header=None)
+
+                    # Determine data_type based on filename
+                    if 'Prices' in file_obj.name:
+                        data_type = 'price'
+                    elif 'Returns' in file_obj.name:
+                        data_type = 'return'
+                    elif 'BQL_Query' in file_obj.name:
+                        data_type = 'equity'
+                    else:
+                        raise ValueError("Could not determine data type from CSV filename.")
+
+                    process_data(df, file_obj, data_type, upload_record)
+
+                else:
+                    raise ValueError("Unsupported file format.")
+
+                return Response({'message': 'File uploaded and processed successfully.'},
+                                status=status.HTTP_201_CREATED)
+
+            except Exception as e:
+                if upload_record:
+                    if os.path.exists(upload_record.filename.path):
+                        os.remove(upload_record.filename.path)
+                    upload_record.delete()
+
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # List all stocks.
@@ -142,10 +296,6 @@ def download_csv(request, pk):
         return Response({"error": "File not found"}, status=404)
 
     return FileResponse(upload.filename.open("rb"), as_attachment=True, filename=os.path.basename(upload.filename.name))
-
-
-
-
 
 # 2. Authentication and Permissions
 
