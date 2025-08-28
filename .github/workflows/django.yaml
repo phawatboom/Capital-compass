@@ -61,6 +61,8 @@ jobs:
 
       - name: Check for missing migrations
         run: python manage.py makemigrations --check --dry-run
+        working-directory: backend
 
       - name: Run pytest with coverage
         run: pytest --cov=webapp --cov-report=xml
+        working-directory: backend
