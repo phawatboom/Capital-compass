@@ -1,0 +1,66 @@
+name: Django CI
+
+on:
+  push: { branches: ["main"] }
+  pull_request: { branches: ["main"] }
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.10, 3.11, 3.12]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: django
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U django -d app"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      # Make your Django settings read these in tests
+      DB_ENGINE: postgres
+      DB_NAME: app
+      DB_USER: django
+      DB_PASSWORD: django
+      DB_HOST: 127.0.0.1         # explicit; avoids IPv6/localhost quirks
+      DB_PORT: "5432"
+      DEBUG: "1"                 # keep permissive DRF defaults during tests
+      SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+      DJANGO_SETTINGS_MODULE: backend.settings  # in case pytest.ini is missing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install system deps if building psycopg/psycopg2 from source (optional)
+        if: ${{ false }} # flip to true only if you don't use a binary wheel
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev python3-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Prefer a binary wheel to avoid apt installs:
+          #   psycopg[binary]  OR  psycopg2-binary
+          pip install -r requirements.txt
+
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run pytest with coverage
+        run: pytest --cov=webapp --cov-report=xml
