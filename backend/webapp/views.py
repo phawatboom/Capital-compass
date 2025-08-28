@@ -65,7 +65,7 @@ class CSVUploadView(APIView):
             else:
                 return Response({"error": "Header row 'Line#,Date,...' not found."}, status=400)
 
-            stock_names = [c for c in header_row[2:] if c]
+            stock_names = [stock_name for stock_name in header_row[2:] if stock_name]
 
             stocks = {}
             for stock_name in stock_names:
