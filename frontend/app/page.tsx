@@ -25,7 +25,8 @@ export default function Home() {
     formData.append("file", file);
 
     try {
-      const res = await api.post("/upload-csv/", formData);
+      // Updated endpoint to '/upload-file/'
+      const res = await api.post("/upload-file/", formData);
       setMessage({ text: res.data.message, type: "success" });
     } catch (err: any) {
       setMessage({
@@ -50,7 +51,8 @@ export default function Home() {
           borderRadius: "8px",
         }}
       >
-        <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        {/* Updated accept attribute to allow both CSV and XLSX files */}
+        <input type="file" accept=".csv, .xlsx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </div>
 
       <button
