@@ -2,14 +2,15 @@ from rest_framework import serializers
 from .models import Stock, StockData, CSVUploadRecord
 
 # This serialiser is used to validate the uploaded CSV file.
-def validate_file(value):
-    if not value.name.endswith('.csv'):
-        raise serializers.ValidationError("Only CSV files are allowed.")
-    return value
+class CSVUploadSerializer(serializers.ModelSerializer):
+    def validate_filename(self, value):
+        if not (value.name.endswith('.csv') or value.name.endswith('.xlsx')):
+            raise serializers.ValidationError("Only CSV and XLSX files are allowed.")
+        return value
 
-# This serializer is used to handle the file upload for CSV files.
-class CSVUploadSerializer(serializers.Serializer):
-    file = serializers.FileField()
+    class Meta:
+        model = CSVUploadRecord
+        fields = ['filename']
 
 # This serializer is used to serialise the Stock model.
 class StockSerializer(serializers.ModelSerializer):
