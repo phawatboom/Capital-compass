@@ -57,16 +57,15 @@ class CSVUploadView(APIView):
             decoded_file = file.read().decode('utf-8')
             io_string = io.StringIO(decoded_file)
             reader = csv.reader(io_string)
-            # Remove empty rows
-            reader = (row for row in reader if any(cell.strip() for cell in row))
+            for row in reader:
+                cells = [c.strip().lower() for c in row]
+                if len(cells) >= 2 and cells[0] == "line#" and cells[1] == "date":
+                    header_row = [c.strip() for c in row]
+                    break
+            else:
+                return Response({"error": "Header row 'Line#,Date,...' not found."}, status=400)
 
-            # Skip first 3 lines
-            for _ in range(3):
-                next(reader)
-
-            # Header row with 'Line#', 'Date', stock names
-            header_row = [cell.strip() for cell in next(reader)]
-            stock_names = [cell.strip() for cell in header_row[2:]]
+            stock_names = [stock_name for stock_name in header_row[2:] if stock_name]
 
             stocks = {}
             for stock_name in stock_names:
