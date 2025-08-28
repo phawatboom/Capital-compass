@@ -11,12 +11,20 @@ class StockData(models.Model):
     stock = models.ForeignKey(Stock, on_delete=models.CASCADE)
     date = models.DateField()
     value = models.FloatField(null=True, blank=True)  # Allow null for #N/A values
+    data_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('price', 'Price'),
+            ('return', 'Return'),
+            ('equity', 'Equity'),
+        ]
+    )
 
     class Meta:
-        unique_together = ('stock', 'date')  # Ensure no duplicate entries for the same stock and date
+        unique_together = ('stock', 'date', 'data_type')  # Ensure no duplicate entries for the same stock, date, and type
 
     def __str__(self):
-        return f"{self.stock.name} on {self.date}: {self.value}"
+        return f"{self.stock.name} on {self.date} ({self.data_type}): {self.value}"
 
 
 # This model is used to record the uploaded CSV files.

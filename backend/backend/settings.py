@@ -22,7 +22,7 @@ CURRENT_DIR = Path(__file__).resolve().parent
 # Load environment variables from .env file
 # SECURITY WARNING: don't run with debug turned on in production!
 env = environ.Env()
-environ.Env.read_env(CURRENT_DIR / '.env')
+environ.Env.read_env(BASE_DIR / '.env')
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env.bool("DEBUG")
 
