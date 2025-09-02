@@ -146,6 +146,7 @@ venv\Scripts\activate
 source venv/bin/activate 
 ```
 
+
 #### Run the Django development server:
 ```bash
 python manage.py runserver
