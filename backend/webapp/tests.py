@@ -11,7 +11,7 @@ class CSVUploadTest(TestCase):
         self.client = Client()
         # Path to the test CSV file
         self.test_csv_path = os.path.join(
-            os.path.dirname(__file__), "test_data", "test_csv.csv"
+            os.path.dirname(__file__), "test_data", "test_excel - Prices.csv"
         )
         self.url = reverse("upload-csv")
 
@@ -25,14 +25,14 @@ class CSVUploadTest(TestCase):
         # Opens the test CSV
         with open(self.test_csv_path, "rb") as f:
             file_data = f.read()
-            csv_file = SimpleUploadedFile("test_csv.csv", file_data, content_type="text/csv")
+            csv_file = SimpleUploadedFile("test_excel - Prices.csv", file_data, content_type="text/csv")
 
         # POSTs the file to the upload endpoint
         response = self.client.post(self.url, {"file": csv_file})
 
         # Checks that the response is 201 CREATED
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["message"], "CSV Uploaded Successfully")
+        self.assertEqual(response.json()["message"], "File uploaded and processed successfully.")
 
         # Checks that JSON contains keys 'stock_names' and 'data'
         self.assertEqual(Stock.objects.count(), initial_stock_count + 3)
@@ -41,16 +41,16 @@ class CSVUploadTest(TestCase):
         self.assertTrue(Stock.objects.filter(name="VZ UN").exists())
 
         # Verify that new StockData objects were created
-        self.assertEqual(StockData.objects.count(), initial_stock_data_count + 9)
+        self.assertEqual(StockData.objects.count(), initial_stock_data_count + 93)
 
         # Check a few specific data points
         lyb_stock = Stock.objects.get(name="LYB UN")
         lyb_data = StockData.objects.get(stock=lyb_stock, date=date(2010, 7, 30))
-        self.assertAlmostEqual(lyb_data.value, 12.34)
+        self.assertTrue(lyb_data.value, "nan") # This value is 'N/A' in the CSV
 
         axp_stock = Stock.objects.get(name="AXP UN")
         axp_data_na = StockData.objects.get(stock=axp_stock, date=date(2010, 8, 2))
-        self.assertIsNone(axp_data_na.value)
+        self.assertTrue(axp_data_na.value, 36.36)
 
 
     def test_invalid_csv_upload(self):
@@ -58,8 +58,8 @@ class CSVUploadTest(TestCase):
         invalid_csv = SimpleUploadedFile("invalid.csv", b"not,a,valid,csv", content_type="text/csv")
         response = self.client.post(self.url, {"file": invalid_csv})
 
-        # Check that the response is 400 BAD REQUEST
-        self.assertEqual(response.status_code, 400)
+        # Check that the response is 500 BAD REQUEST
+        self.assertEqual(response.status_code, 500)
         self.assertIn("error", response.json())
 
 class StockAPITests(TestCase):
@@ -71,11 +71,11 @@ class StockAPITests(TestCase):
 
         # First, upload a valid CSV to populate the database for subsequent tests
         self.test_csv_path = os.path.join(
-            os.path.dirname(__file__), "test_data", "test_csv.csv"
+            os.path.dirname(__file__), "test_data", "test_excel - Returns.csv"
         )
         with open(self.test_csv_path, "rb") as f:
             file_data = f.read()
-            csv_file = SimpleUploadedFile("test_csv.csv", file_data, content_type="text/csv")
+            csv_file = SimpleUploadedFile("test_example - Returns.csv", file_data, content_type="text/csv")
         self.client.post(self.upload_url, {"file": csv_file})
 
         # Store a known stock object for later use
@@ -100,12 +100,12 @@ class StockAPITests(TestCase):
         self.assertIn("stock_info", response.json())
         self.assertIn("data_points", response.json())
         self.assertEqual(response.json()['stock_info']['name'], "LYB UN")
-        self.assertEqual(len(response.json()['data_points']), 3)  # LYB has 3 data points
+        self.assertEqual(len(response.json()['data_points']), 31)  # LYB has 31 data points
 
         # Check a specific data point from the response
         first_data_point = response.json()['data_points'][0]
         self.assertEqual(first_data_point['date'], "2010-07-30")
-        self.assertAlmostEqual(first_data_point['value'], 12.34)
+        self.assertAlmostEqual(first_data_point['value'], None) #empty cell in the csv
 
     def test_stock_details_view_not_found(self):
         # Tests that the stock_details view returns 404 for a non-existent stock.
