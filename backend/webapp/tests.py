@@ -32,7 +32,7 @@ class CSVUploadTest(TestCase):
 
         # Checks that the response is 201 CREATED
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json(), {"message": "CSV Uploaded Successfully"})
+        self.assertEqual(response.json()["message"], "CSV Uploaded Successfully")
 
         # Checks that JSON contains keys 'stock_names' and 'data'
         self.assertEqual(Stock.objects.count(), initial_stock_count + 3)

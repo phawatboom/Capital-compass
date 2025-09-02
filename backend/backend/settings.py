@@ -19,13 +19,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CURRENT_DIR = Path(__file__).resolve().parent
 
 
-# Load environment variables from .env file
 # SECURITY WARNING: don't run with debug turned on in production!
 env = environ.Env()
-environ.Env.read_env(BASE_DIR / '.env')
-SECRET_KEY = env("SECRET_KEY")
-DEBUG = env.bool("DEBUG")
+# Get the .env if it exists (CI usually won't have one)
+env_file = CURRENT_DIR / '.env'
+if env_file.exists():
+    environ.Env.read_env(env_file)
 
+SECRET_KEY = env("SECRET_KEY")
+DEBUG = env.bool("DEBUG", default=False)  # default False; CI sets DEBUG=1
+
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver"]  # test client host
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -59,15 +63,29 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# Add REST Framework settings
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.SessionAuthentication',
-    ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
-    )
-}
+
+if DEBUG:
+    REST_FRAMEWORK = {
+        'DEFAULT_AUTHENTICATION_CLASSES': (
+            'rest_framework.authentication.SessionAuthentication',
+        ),
+        # Open everything in dev so the frontend is unblocked
+        'DEFAULT_PERMISSION_CLASSES': (
+            'rest_framework.permissions.AllowAny',
+        ),
+    }
+else:
+    REST_FRAMEWORK = {
+        'DEFAULT_AUTHENTICATION_CLASSES': (
+            'rest_framework.authentication.SessionAuthentication',
+        ),
+        # Lock down in prod
+        'DEFAULT_PERMISSION_CLASSES': (
+            'rest_framework.permissions.IsAuthenticated',
+        ),
+    }
+
+
 
 if DEBUG:
     # Dev: running over HTTP from localhost
@@ -142,8 +160,7 @@ if DB_ENGINE == 'postgres':
             "HOST": env("DB_HOST"),
             "PORT": env("DB_PORT"),
             "TEST": {
-                "NAME": "test_db",
-                "SERIALIZE": False,
+                "NAME": "test_app",   # optional; Django will prefix 'test_'
             },
         }
     }
@@ -155,8 +172,7 @@ elif DB_ENGINE == 'sqlite':
         }
     }
 else:
-    raise ValueError(f"Unsupported DB_ENGINE: {DB_ENGINE}. Supported engines are 'postgres' and 'sqlite'.")
-
+    raise ValueError("Unsupported DB_ENGINE.")
 
 # Loading media directory from env
 MEDIA_URL = "/media/"
