@@ -5,6 +5,7 @@ import "./globals.css"
 import Link from "next/link"
 import { BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {AuthProvider} from "@/app/lib/authContext";
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,6 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
+      <AuthProvider>
         {/* Global Header Navigation */}
         <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50 print:hidden">
           <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -49,6 +51,8 @@ export default function RootLayout({
           </div>
         </header>
         {children}
+      </AuthProvider>
+
       </body>
     </html>
   )

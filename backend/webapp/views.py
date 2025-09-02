@@ -201,7 +201,7 @@ def process_data(df, file, data_type, upload_record):
 # --------------------------------------------------------------------------------------
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         file_obj = request.data.get('file')
@@ -235,11 +235,11 @@ class FileUploadView(APIView):
                     df = pd.read_csv(file_path, header=None)
 
                     # Determine data_type based on filename
-                    if 'Prices' in file_obj.name:
+                    if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'Returns' in file_obj.name:
+                    elif 'returns' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'BQL_Query' in file_obj.name:
+                    elif 'bql_query' in file_obj.name.lower():
                         data_type = 'equity'
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
@@ -311,9 +311,9 @@ def download_csv(request, pk):
     return FileResponse(upload.filename.open("rb"), as_attachment=True, filename=os.path.basename(upload.filename.name))
 
 # 2. Authentication and Permissions
-
-
-
+#
+#
+#
 # --- CSRF bootstrap ---
 @api_view(["GET"])
 @ensure_csrf_cookie
@@ -379,6 +379,10 @@ def me(request):
             u.has_perm("webapp.can_moderate")
         ) if u.is_authenticated else False,
     })
+
+
+
+
 # # --- CSRF bootstrap ---
 # @api_view(["GET"])
 # @ensure_csrf_cookie
