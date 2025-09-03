@@ -24,12 +24,9 @@ type UploadRecord = {
 
 type FileMeta = {
   id: number;
-  filename: string;
-  uploaded_at: string;
-  size: number;
-  type: string;
-  rows?: number;
-  sheets?: { name: string; rows: number; cols: number }[];
+  filename: string;       // basename from backend
+  uploaded_at: string;    // ISO
+  file_size: number;      // matches backend 'file_size'
 };
 
 type SortKey = "name" | "uploaded_at";
@@ -103,6 +100,8 @@ export default function UploadsPage() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoLoading, setInfoLoading] = useState(false);
   const [infoData, setInfoData] = useState<FileMeta | null>(null);
+  const [previewRows, setPreviewRows] = useState<string[][] | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const fetchUploads = useCallback(async () => {
     setLoading(true);
@@ -277,15 +276,45 @@ export default function UploadsPage() {
     }
   };
 
+
+  const loadPreview = useCallback(async (id: number) => {
+  setPreviewRows(null);
+  setPreviewError(null);
+  try {
+    const url = `${API_BASE}/csv-uploads/${id}/download/`;
+    const resp = await fetch(url, { credentials: "include" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const ab = await resp.arrayBuffer();
+
+    // dynamic import to keep bundle small and avoid SSR issues
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(ab, { type: "array" });
+    const sheetName = wb.SheetNames?.[0];
+    if (!sheetName) throw new Error("No sheets found");
+    const ws = wb.Sheets[sheetName];
+
+    // header:1 => array-of-arrays
+    const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[];
+    const preview = rows.slice(0, 10).map((r: any) => (Array.isArray(r) ? r.slice(0, 10) : [String(r)]));
+    setPreviewRows(preview);
+  } catch (e) {
+    setPreviewError("Preview unavailable.");
+  }
+}, []);
+
   const openInfo = async (id: number) => {
     setInfoOpen(true);
     setInfoLoading(true);
     setInfoData(null);
+    setPreviewRows(null);
+    setPreviewError(null);
     try {
-      const { data } = await api.get<FileMeta>(`/csv-uploads/${id}/meta/`);
-      setInfoData(data);
-    } catch {
+      const res = await api.get(`/csv-uploads/${id}/meta/`);
+      setInfoData(res.data);
+      await loadPreview(id);
+    } catch (e) {
       setInfoData(null);
+      setPreviewError("Failed to load file info.");
     } finally {
       setInfoLoading(false);
     }
@@ -566,28 +595,43 @@ export default function UploadsPage() {
               <div className="text-sm text-red-600">Failed to load file info.</div>
             )}
             {!infoLoading && infoData && (
-              <div className="space-y-2 text-sm">
-                <div><span className="text-gray-500">Name:</span> {basename(infoData.filename)}</div>
-                <div><span className="text-gray-500">Type:</span> {infoData.type?.toUpperCase() || "—"}</div>
-                <div><span className="text-gray-500">Size:</span> {formatBytes(infoData.file_size)}</div>
-                <div><span className="text-gray-500">Uploaded:</span> {formatDate(infoData.uploaded_at)}</div>
-                {"rows" in infoData && (
-                  <div><span className="text-gray-500">Rows:</span> {infoData.rows}</div>
+            <div className="space-y-2 text-sm">
+              <div><span className="text-gray-500">Name:</span> {basename(infoData.filename)}</div>
+              <div><span className="text-gray-500">Type:</span> {ext(infoData.filename).toUpperCase() || "—"}</div>
+              <div><span className="text-gray-500">Size:</span> {formatBytes(infoData.file_size)}</div>
+              <div><span className="text-gray-500">Uploaded:</span> {formatDate(infoData.uploaded_at)}</div>
+
+              {/* Preview section */}
+              <div className="mt-3">
+                <div className="text-sm font-medium mb-1">Preview (first 10×10)</div>
+                {previewError && <div className="text-sm text-red-600">{previewError}</div>}
+                {!previewError && !previewRows && (
+                  <div className="text-sm text-gray-600">Loading preview...</div>
                 )}
-                {infoData.sheets && infoData.sheets.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-gray-500 mb-1">Sheets:</div>
-                    <ul className="list-disc pl-5 space-y-1">
-                      {infoData.sheets.map((s) => (
-                        <li key={s.name}>
-                          <span className="font-medium">{s.name}</span> — {s.rows} rows, {s.cols} cols
-                        </li>
-                      ))}
-                    </ul>
+                {previewRows && (
+                  <div className="overflow-auto max-h-64 border rounded">
+                    <table className="min-w-full text-xs">
+                      <tbody>
+                        {previewRows.map((row, i) => (
+                          <tr key={i} className="border-b last:border-b-0">
+                            {Array.from({ length: 10 }).map((_, j) => (
+                              <td
+                                key={j}
+                                className="px-2 py-1 border-r last:border-r-0 whitespace-nowrap align-top"
+                                title={row?.[j] != null ? String(row[j]) : ""}
+                              >
+                                {row?.[j] != null ? String(row[j]) : ""}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
-            )}
+            </div>
+          )}
             <div className="mt-4 flex justify-end">
               <Button variant="outline" onClick={() => setInfoOpen(false)}>
                 Close
