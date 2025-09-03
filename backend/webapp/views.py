@@ -215,7 +215,9 @@ class FileUploadView(APIView):
             try:
                 upload_record = serializer.save()
                 file_path = upload_record.filename.path
-
+                file_size = os.path.getsize(file_path)
+                upload_record.file_size = file_size
+                upload_record.save(update_fields=['file_size'])
                 # Handle XLSX files with multiple sheets
                 if file_path.endswith('.xlsx'):
                     sheets_to_process = {
@@ -300,6 +302,24 @@ def list_csv_uploads(request):
     return Response(serializer.data)
 
 
+@api_view(["DELETE"])
+def delete_csv_upload(request, pk: int):
+    try:
+        record = CSVUploadRecord.objects.get(pk=pk)
+    except CSVUploadRecord.DoesNotExist:
+        return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        if record.filename:
+            record.filename.delete(save=False)
+    except Exception:
+        # ignore file removal errors; proceed to delete db record
+        pass
+
+    record.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @api_view(["GET"])
 # @permission_classes([IsAuthenticated])
 def download_csv(request, pk):
@@ -309,6 +329,23 @@ def download_csv(request, pk):
         return Response({"error": "File not found"}, status=404)
 
     return FileResponse(upload.filename.open("rb"), as_attachment=True, filename=os.path.basename(upload.filename.name))
+
+
+@api_view(["GET"])
+def information_file(request, pk):
+    try:
+        upload = CSVUploadRecord.objects.get(pk=pk)
+    except CSVUploadRecord.DoesNotExist:
+        return Response({"error": "File not found"}, status=404)
+    info = {
+        "id": upload.id,
+        "filename": os.path.basename(upload.filename.name),
+        "uploaded_at": upload.uploaded_at,
+        "file_size": upload.file_size,
+    }
+    return Response(info)
+
+
 
 # 2. Authentication and Permissions
 #

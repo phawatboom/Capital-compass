@@ -31,9 +31,12 @@ export default function RootLayout({
               <BarChart3 className="h-8 w-8 text-blue-600" />
               <span className="text-2xl font-bold text-gray-900">Capital Compass</span>
             </Link>
-            <nav className="flex items-center space-x-6">
+            <nav className="flex items-center space-x-8">
               <Link href="/" className="text-gray-600 hover:text-gray-900">
                 Home
+              </Link>
+                <Link href="/uploads" className="text-gray-600 hover:text-gray-900">
+                My Data
               </Link>
               <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
                 Dashboard
