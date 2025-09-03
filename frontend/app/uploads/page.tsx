@@ -1,6 +1,8 @@
+// typescript
+// File: 'frontend/app/uploads/page.tsx'
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
   Search,
@@ -11,8 +13,10 @@ import {
   SortDesc,
   Link as LinkIcon,
   Info,
+  ShieldAlert,
+  Filter as FilterIcon,
 } from "lucide-react";
-import api from "../lib/api";
+import * as XLSX from "xlsx";
 import RequireAuth from "../lib/requireAuth";
 import { Button } from "@/components/ui/button";
 
@@ -24,14 +28,13 @@ type UploadRecord = {
 
 type FileMeta = {
   id: number;
-  filename: string;       // basename from backend
-  uploaded_at: string;    // ISO
-  file_size: number;      // matches backend 'file_size'
+  filename: string; // basename from backend
+  uploaded_at: string; // ISO
+  file_size: number;
 };
 
 type SortKey = "name" | "uploaded_at";
 type SortDir = "asc" | "desc";
-
 type ConfirmState =
   | { mode: "single"; id: number; name: string }
   | { mode: "bulk" }
@@ -44,13 +47,11 @@ function basename(p: string): string {
   const parts = (p ?? "").split(/[\\/]/);
   return parts[parts.length - 1] || p || "";
 }
-
 function ext(p: string): string {
   const b = basename(p);
   const i = b.lastIndexOf(".");
   return i >= 0 ? b.slice(i + 1).toLowerCase() : "";
 }
-
 function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "—";
   const units = ["B", "KB", "MB", "GB"];
@@ -62,16 +63,27 @@ function formatBytes(n: number): string {
   }
   return `${val.toFixed(val < 10 && idx > 0 ? 1 : 0)} ${units[idx]}`;
 }
-
 function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString();
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso || "—";
+    return d.toLocaleString();
   } catch {
-    return iso;
+    return iso || "—";
   }
+}
+function isoDay(iso: string): string {
+  const i = iso.indexOf("T");
+  return i > 0 ? iso.slice(0, i) : iso.slice(0, 10);
+}
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 export default function UploadsPage() {
+  // Data
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -79,6 +91,7 @@ export default function UploadsPage() {
   // Filters/sort/pagination
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"" | "csv" | "xlsx">("");
+  const [dayFilter, setDayFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("uploaded_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
@@ -103,14 +116,28 @@ export default function UploadsPage() {
   const [previewRows, setPreviewRows] = useState<string[][] | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  // "Arm to delete" state: hide delete by default; reveal for 5s after arming
+  const [armed, setArmed] = useState<Set<number>>(new Set());
+  const armTimers = useRef<Map<number, number>>(new Map());
+  const disarmAll = useCallback(() => {
+    armTimers.current.forEach((t) => window.clearTimeout(t));
+    armTimers.current.clear();
+    setArmed(new Set());
+  }, []);
+  useEffect(() => () => disarmAll(), [disarmAll]);
+
   const fetchUploads = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await api.get<UploadRecord[]>("/csv-uploads/");
-      setUploads(data);
-    } catch {
-      setError("Failed to load uploads.");
+      const r = await fetch(`${API_BASE}/csv-uploads/`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(`Failed to load uploads (${r.status})`);
+      const data: UploadRecord[] = await r.json();
+      setUploads(data ?? []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load uploads");
     } finally {
       setLoading(false);
     }
@@ -123,26 +150,27 @@ export default function UploadsPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return uploads.filter((u) => {
-      const name = basename(u.filename).toLowerCase();
-      const t = ext(u.filename);
-      const matchesName = !q || name.includes(q);
-      const matchesType = !typeFilter || t === typeFilter;
-      return matchesName && matchesType;
+      const name = basename(u.filename);
+      const matchesQuery = !q || name.toLowerCase().includes(q);
+      const e = ext(u.filename);
+      const matchesType = !typeFilter || e === typeFilter;
+      const matchesDay = !dayFilter || isoDay(u.uploaded_at) === dayFilter;
+      return matchesQuery && matchesType && matchesDay;
     });
-  }, [uploads, query, typeFilter]);
+  }, [uploads, query, typeFilter, dayFilter]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
     arr.sort((a, b) => {
-      if (sortKey === "name") {
-        const an = basename(a.filename).toLowerCase();
-        const bn = basename(b.filename).toLowerCase();
-        return sortDir === "asc" ? an.localeCompare(bn) : bn.localeCompare(an);
-      } else {
-        const ad = +new Date(a.uploaded_at);
-        const bd = +new Date(b.uploaded_at);
-        return sortDir === "asc" ? ad - bd : bd - ad;
+      if (sortKey === "uploaded_at") {
+        const ta = new Date(a.uploaded_at).getTime();
+        const tb = new Date(b.uploaded_at).getTime();
+        return sortDir === "asc" ? ta - tb : tb - ta;
       }
+      // name
+      const av = basename(a.filename).toLowerCase();
+      const bv = basename(b.filename).toLowerCase();
+      return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
     });
     return arr;
   }, [filtered, sortKey, sortDir]);
@@ -155,20 +183,29 @@ export default function UploadsPage() {
   }, [sorted, currentPage, pageSize]);
 
   const toggleSort = (key: SortKey) => {
+    setPage(1);
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir("asc");
+      setSortDir(key === "uploaded_at" ? "desc" : "asc");
     }
   };
 
   const clearFilters = () => {
     setQuery("");
     setTypeFilter("");
+    setDayFilter(null);
     setSortKey("uploaded_at");
     setSortDir("desc");
     setPage(1);
+  };
+
+  const removeFilterChip = (kind: "query" | "type" | "day") => {
+    setPage(1);
+    if (kind === "query") setQuery("");
+    if (kind === "type") setTypeFilter("");
+    if (kind === "day") setDayFilter(null);
   };
 
   const handleSelectAllOnPage = (checked: boolean) => {
@@ -195,17 +232,32 @@ export default function UploadsPage() {
     const url = `${API_BASE}/csv-uploads/${id}/download/`;
     try {
       await navigator.clipboard.writeText(url);
-      setMessage("Download link copied to clipboard.");
-      setTimeout(() => setMessage(null), 2500);
+      setMessage("Download link copied");
+      setTimeout(() => setMessage(null), 1500);
     } catch {
-      setError("Failed to copy link.");
-      setTimeout(() => setError(null), 2500);
+      setError("Failed to copy link");
+      setTimeout(() => setError(null), 2000);
     }
   };
 
+  async function ensureCsrf(): Promise<string> {
+    await fetch(`${API_BASE}/auth/csrf/`, { credentials: "include" });
+    const token = getCsrfToken();
+    if (!token) throw new Error("Missing CSRF token");
+    return token;
+  }
+
   const deleteOne = useCallback(async (id: number) => {
-    await api.get("/auth/csrf/");
-    await api.delete(`/csv-uploads/${id}/`);
+    const token = await ensureCsrf();
+    const r = await fetch(`${API_BASE}/csv-uploads/${id}/`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "X-CSRFToken": token },
+    });
+    if (!r.ok && r.status !== 204) {
+      const txt = await r.text().catch(() => "");
+      throw new Error(`Delete failed (${r.status}) ${txt}`);
+    }
   }, []);
 
   const openConfirmSingle = (id: number, name: string) =>
@@ -223,7 +275,6 @@ export default function UploadsPage() {
     try {
       if (confirm.mode === "single") {
         await deleteOne(confirm.id);
-        setUploads((prev) => prev.filter((u) => u.id !== confirm.id));
         setSelected((prev) => {
           const n = new Set(prev);
           n.delete(confirm.id);
@@ -234,16 +285,15 @@ export default function UploadsPage() {
         for (const id of ids) {
           await deleteOne(id);
         }
-        setUploads((prev) => prev.filter((u) => !selected.has(u.id)));
         setSelected(new Set());
       }
-      setMessage("Delete completed.");
-      setTimeout(() => setMessage(null), 2000);
-    } catch {
-      setError("Failed to delete file(s).");
+      disarmAll();
+      await fetchUploads();
+      setConfirm(null);
+    } catch (e: any) {
+      setError(e?.message || "Delete failed");
     } finally {
       setBusy(false);
-      setConfirm(null);
     }
   };
 
@@ -256,51 +306,59 @@ export default function UploadsPage() {
     setMessage(null);
     setError(null);
     try {
-      await api.get("/auth/csrf/");
+      const token = await ensureCsrf();
       const fd = new FormData();
       fd.append("file", file);
-      await api.post("/upload-csv/", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
+      const r = await fetch(`${API_BASE}/upload-csv/`, {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+        headers: { "X-CSRFToken": token },
       });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data?.error || `Upload failed (${r.status})`);
+      }
       setFile(null);
-      setMessage("File uploaded successfully.");
+      setMessage("Uploaded successfully");
       await fetchUploads();
-    } catch (err: any) {
-      setError(
-        err?.response?.data?.error ||
-          "Upload failed. Please verify the file format."
-      );
+    } catch (e: any) {
+      setError(e?.message || "Upload failed");
     } finally {
       setUploading(false);
-      setTimeout(() => setMessage(null), 2500);
+      setTimeout(() => {
+        setMessage(null);
+        setError(null);
+      }, 2500);
     }
   };
 
-
+  // Data preview loader (first sheet/CSV 10x10)
   const loadPreview = useCallback(async (id: number) => {
-  setPreviewRows(null);
-  setPreviewError(null);
-  try {
-    const url = `${API_BASE}/csv-uploads/${id}/download/`;
-    const resp = await fetch(url, { credentials: "include" });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const ab = await resp.arrayBuffer();
-
-    // dynamic import to keep bundle small and avoid SSR issues
-    const XLSX = await import("xlsx");
-    const wb = XLSX.read(ab, { type: "array" });
-    const sheetName = wb.SheetNames?.[0];
-    if (!sheetName) throw new Error("No sheets found");
-    const ws = wb.Sheets[sheetName];
-
-    // header:1 => array-of-arrays
-    const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[];
-    const preview = rows.slice(0, 10).map((r: any) => (Array.isArray(r) ? r.slice(0, 10) : [String(r)]));
-    setPreviewRows(preview);
-  } catch (e) {
-    setPreviewError("Preview unavailable.");
-  }
-}, []);
+    setPreviewRows(null);
+    setPreviewError(null);
+    try {
+      const r = await fetch(`${API_BASE}/csv-uploads/${id}/download/`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(`Failed to fetch file (${r.status})`);
+      const buf = await r.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+      const firstSheetName = wb.SheetNames[0];
+      if (!firstSheetName) {
+        setPreviewRows([]);
+        return;
+      }
+      const sheet = wb.Sheets[firstSheetName];
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      const top = rows.slice(0, 10).map((row) =>
+        row.slice(0, 10).map((v) => (v == null ? "" : String(v)))
+      );
+      setPreviewRows(top);
+    } catch (e: any) {
+      setPreviewError(e?.message || "Preview failed");
+    }
+  }, []);
 
   const openInfo = async (id: number) => {
     setInfoOpen(true);
@@ -309,31 +367,60 @@ export default function UploadsPage() {
     setPreviewRows(null);
     setPreviewError(null);
     try {
-      const res = await api.get(`/csv-uploads/${id}/meta/`);
-      setInfoData(res.data);
+      const r = await fetch(`${API_BASE}/csv-uploads/${id}/meta/`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(`Failed to load file info (${r.status})`);
+      const meta: FileMeta = await r.json();
+      setInfoData(meta);
+      // Load preview after meta
       await loadPreview(id);
-    } catch (e) {
-      setInfoData(null);
-      setPreviewError("Failed to load file info.");
+    } catch (e: any) {
+      setPreviewError(e?.message || "Failed to load info");
     } finally {
       setInfoLoading(false);
     }
   };
 
+  // Arm delete handling
+  const toggleArm = (id: number) => {
+    setArmed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        const t = armTimers.current.get(id);
+        if (t) window.clearTimeout(t);
+        armTimers.current.delete(id);
+      } else {
+        next.add(id);
+        const t = window.setTimeout(() => {
+          setArmed((p) => {
+            const n = new Set(p);
+            n.delete(id);
+            return n;
+          });
+          armTimers.current.delete(id);
+        }, 5000);
+        armTimers.current.set(id, t);
+      }
+      return next;
+    });
+  };
+
+  // Render
   return (
     <RequireAuth>
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <h1 className="text-2xl font-semibold">My Uploads</h1>
-          <form onSubmit={handleUpload} className="flex items-center gap-3">
+      <div className="mx-auto w-full max-w-screen-xl px-3 sm:px-4 py-6">
+        <div className="mb-6">
+          <form onSubmit={handleUpload} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <input
               type="file"
-              className="block text-sm"
+              className="border rounded px-3 py-2 w-full sm:w-auto"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               accept=".csv,.xlsx"
             />
-            <Button type="submit" disabled={!file || uploading}>
-              <UploadIcon className="h-4 w-4 mr-2" />
+            <Button type="submit" disabled={!file || uploading} className="inline-flex items-center gap-2">
+              <UploadIcon className="w-4 h-4" />
               {uploading ? "Uploading..." : "Upload"}
             </Button>
           </form>
@@ -341,305 +428,409 @@ export default function UploadsPage() {
 
         {(message || error) && (
           <div
-            className={`mb-4 rounded px-4 py-3 text-sm ${
-              message
-                ? "bg-green-50 text-green-800 border border-green-200"
-                : "bg-red-50 text-red-800 border border-red-200"
+            className={`mb-4 text-sm rounded px-3 py-2 ${
+              message ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-700 border border-red-200"
             }`}
           >
             {message || error}
           </div>
         )}
 
-        <div className="bg-white border rounded-lg p-4 shadow-sm mb-4">
+        {/* Filters bar */}
+        <div className="bg-white border rounded-lg p-4 shadow-sm mb-3 w-full">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[220px]">
-              <label className="text-xs text-gray-600">Search name</label>
-              <div className="flex items-center border rounded px-2 py-1">
-                <Search className="h-4 w-4 text-gray-500 mr-2" />
+              <label className="text-xs text-gray-500">Search</label>
+              <div className="relative">
                 <input
+                  className="w-full border rounded px-3 py-2 pr-9"
+                  placeholder="Filter by name..."
                   value={query}
                   onChange={(e) => {
                     setQuery(e.target.value);
                     setPage(1);
                   }}
-                  placeholder="e.g. prices"
-                  className="w-full outline-none text-sm"
                 />
+                <Search className="absolute right-2 top-2.5 h-4 w-4 text-gray-400" />
               </div>
             </div>
             <div>
-              <label className="text-xs text-gray-600">File type</label>
+              <label className="text-xs text-gray-500">Type</label>
               <select
+                className="border rounded px-3 py-2"
                 value={typeFilter}
                 onChange={(e) => {
                   setTypeFilter(e.target.value as any);
                   setPage(1);
                 }}
-                className="border rounded px-2 py-1 text-sm"
               >
                 <option value="">All</option>
                 <option value="csv">CSV</option>
                 <option value="xlsx">XLSX</option>
               </select>
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => toggleSort("name")}
-                className="text-sm"
-              >
-                Name {sortKey === "name" ? (sortDir === "asc" ? <SortAsc className="ml-1 h-4 w-4" /> : <SortDesc className="ml-1 h-4 w-4" />) : null}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => toggleSort("uploaded_at")}
-                className="text-sm"
-              >
-                Uploaded {sortKey === "uploaded_at" ? (sortDir === "asc" ? <SortAsc className="ml-1 h-4 w-4" /> : <SortDesc className="ml-1 h-4 w-4" />) : null}
-              </Button>
-              <Button variant="ghost" onClick={clearFilters} className="text-sm">
-                <X className="h-4 w-4 mr-1" />
-                Clear
+            <div className="ml-auto">
+              <Button type="button" variant="outline" onClick={clearFilters} className="h-9">
+                Clear filters
               </Button>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-sm text-gray-600">
-            {loading ? "Loading..." : `${sorted.length} file(s)`}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="destructive"
-              disabled={selected.size === 0}
-              onClick={openConfirmBulk}
-              className="text-sm"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete selected
-            </Button>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(parseInt(e.target.value, 10));
-                setPage(1);
-              }}
-              className="border rounded px-2 py-1 text-sm"
-            >
-              {[10, 20, 50].map((n) => (
-                <option key={n} value={n}>
-                  {n} / page
-                </option>
-              ))}
-            </select>
+          {/* Active filter chips */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {query && (
+              <span className="inline-flex items-center gap-2 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                Query: {query}
+                <button onClick={() => removeFilterChip("query")} className="hover:text-gray-900">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {typeFilter && (
+              <span className="inline-flex items-center gap-2 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                Type: {typeFilter.toUpperCase()}
+                <button onClick={() => removeFilterChip("type")} className="hover:text-gray-900">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {dayFilter && (
+              <span className="inline-flex items-center gap-2 text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                Date: {dayFilter}
+                <button onClick={() => removeFilterChip("day")} className="hover:text-gray-900">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="overflow-x-auto bg-white border rounded-lg shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr className="text-left">
-                <th className="px-3 py-2 w-10">
-                  <input
-                    type="checkbox"
-                    checked={
-                      pageData.length > 0 &&
-                      pageData.every((u) => selected.has(u.id))
-                    }
-                    onChange={(e) =>
-                      handleSelectAllOnPage(e.currentTarget.checked)
-                    }
-                  />
-                </th>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Uploaded</th>
-                <th className="px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageData.map((u) => {
-                const name = basename(u.filename);
-                const t = ext(u.filename);
-                return (
-                  <tr key={u.id} className="border-t">
-                    <td className="px-3 py-2 align-middle">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(u.id)}
-                        onChange={(e) =>
-                          handleSelectOne(u.id, e.currentTarget.checked)
-                        }
-                      />
-                    </td>
-                    <td className="px-3 py-2 align-middle">{name}</td>
-                    <td className="px-3 py-2 align-middle uppercase">{t || "—"}</td>
-                    <td className="px-3 py-2 align-middle">
-                      {formatDate(u.uploaded_at)}
-                    </td>
-                    <td className="px-3 py-2 align-middle">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDownload(u.id)}
-                          title="Download"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCopyLink(u.id)}
-                          title="Copy download link"
-                        >
-                          <LinkIcon className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openInfo(u.id)}
-                          title="File info"
-                        >
-                          <Info className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => openConfirmSingle(u.id, name)}
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+        {/* Table */}
+        <div className="bg-white border rounded-lg shadow-sm overflow-hidden w-full">
+          <div className="overflow-x-auto w-full">
+            <table className="w-full table-auto min-w-[720px] sm:min-w-full">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-xs font-semibold text-gray-500">
+                  <th className="px-3 py-2 w-10">
+                    <input
+                      type="checkbox"
+                      onChange={(e) => handleSelectAllOnPage(e.target.checked)}
+                      checked={pageData.length > 0 && pageData.every((u) => selected.has(u.id))}
+                      aria-label="Select all on page"
+                    />
+                  </th>
+                  <th className="px-3 py-2 cursor-pointer select-none" onClick={() => toggleSort("name")}>
+                    <div className="inline-flex items-center gap-2">
+                      Name
+                      {sortKey === "name" &&
+                        (sortDir === "asc" ? (
+                          <SortAsc className="w-3.5 h-3.5 text-gray-400" />
+                        ) : (
+                          <SortDesc className="w-3.5 h-3.5 text-gray-400" />
+                        ))}
+                    </div>
+                  </th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2 cursor-pointer select-none" onClick={() => toggleSort("uploaded_at")}>
+                    <div className="inline-flex items-center gap-2">
+                      Uploaded
+                      {sortKey === "uploaded_at" &&
+                        (sortDir === "asc" ? (
+                          <SortAsc className="w-3.5 h-3.5 text-gray-400" />
+                        ) : (
+                          <SortDesc className="w-3.5 h-3.5 text-gray-400" />
+                        ))}
+                    </div>
+                  </th>
+                  <th className="px-3 py-2 w-48 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-500">
+                      Loading...
                     </td>
                   </tr>
-                );
-              })}
-              {!loading && pageData.length === 0 && (
-                <tr>
-                  <td className="px-3 py-8 text-center text-gray-500" colSpan={5}>
-                    No files match your filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : pageData.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-500">
+                      No uploads found
+                    </td>
+                  </tr>
+                ) : (
+                  pageData.map((u) => {
+                    const name = basename(u.filename);
+                    const e = ext(u.filename);
+                    const armedNow = armed.has(u.id);
+                    return (
+                      <tr key={u.id} className="border-t text-sm">
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(u.id)}
+                            onChange={(ev) => handleSelectOne(u.id, ev.target.checked)}
+                            aria-label={`Select ${name}`}
+                          />
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900 truncate">{name}</span>
+                            <button
+                              title="Filter by this name"
+                              className="p-1 rounded-full hover:bg-gray-100 text-gray-500"
+                              onClick={(e2) => {
+                                e2.stopPropagation();
+                                setQuery(name);
+                                setPage(1);
+                              }}
+                            >
+                              <FilterIcon className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <span className="inline-block text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                            {e ? e.toUpperCase() : "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <button
+                            className="text-left text-gray-700 hover:underline"
+                            title="Filter by day"
+                            onClick={() => {
+                              setDayFilter(isoDay(u.uploaded_at));
+                              setPage(1);
+                            }}
+                          >
+                            {formatDate(u.uploaded_at)}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 px-2"
+                              onClick={() => openInfo(u.id)}
+                              title="Info"
+                            >
+                              <Info className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 px-2"
+                              onClick={() => handleDownload(u.id)}
+                              title="Download"
+                            >
+                              <Download className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 px-2"
+                              onClick={() => handleCopyLink(u.id)}
+                              title="Copy link"
+                            >
+                              <LinkIcon className="w-4 h-4" />
+                            </Button>
 
-        <div className="flex items-center justify-between mt-4">
-          <div className="text-sm text-gray-600">
-            Page {currentPage} of {totalPages}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentPage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Prev
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentPage >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      </div>
+                            <button
+                              className={`h-8 w-8 inline-flex items-center justify-center rounded-full border ${
+                                armedNow
+                                  ? "border-amber-300 bg-amber-50 text-amber-700"
+                                  : "border-gray-200 bg-white text-gray-500"
+                              }`}
+                              onClick={() => toggleArm(u.id)}
+                              title={armedNow ? "Disarm delete" : "Arm delete"}
+                            >
+                              <ShieldAlert className="w-4 h-4" />
+                            </button>
 
-      {/* Delete Confirm Modal */}
-      {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-            <h2 className="text-lg font-semibold mb-2">Confirm deletion</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              {confirm.mode === "single"
-                ? `Delete “${confirm.name}”? This action cannot be undone.`
-                : `Delete ${selected.size} selected file(s)? This action cannot be undone.`}
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={cancelConfirm} disabled={busy}>
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={confirmDelete} disabled={busy}>
-                {busy ? "Deleting..." : "Delete"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Info Modal */}
-      {infoOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setInfoOpen(false)} />
-          <div className="relative bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold">File info</h2>
-              <button onClick={() => setInfoOpen(false)}>
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            {infoLoading && <div className="text-sm text-gray-600">Loading...</div>}
-            {!infoLoading && !infoData && (
-              <div className="text-sm text-red-600">Failed to load file info.</div>
-            )}
-            {!infoLoading && infoData && (
-            <div className="space-y-2 text-sm">
-              <div><span className="text-gray-500">Name:</span> {basename(infoData.filename)}</div>
-              <div><span className="text-gray-500">Type:</span> {ext(infoData.filename).toUpperCase() || "—"}</div>
-              <div><span className="text-gray-500">Size:</span> {formatBytes(infoData.file_size)}</div>
-              <div><span className="text-gray-500">Uploaded:</span> {formatDate(infoData.uploaded_at)}</div>
-
-              {/* Preview section */}
-              <div className="mt-3">
-                <div className="text-sm font-medium mb-1">Preview (first 10×10)</div>
-                {previewError && <div className="text-sm text-red-600">{previewError}</div>}
-                {!previewError && !previewRows && (
-                  <div className="text-sm text-gray-600">Loading preview...</div>
-                )}
-                {previewRows && (
-                  <div className="overflow-auto max-h-64 border rounded">
-                    <table className="min-w-full text-xs">
-                      <tbody>
-                        {previewRows.map((row, i) => (
-                          <tr key={i} className="border-b last:border-b-0">
-                            {Array.from({ length: 10 }).map((_, j) => (
-                              <td
-                                key={j}
-                                className="px-2 py-1 border-r last:border-r-0 whitespace-nowrap align-top"
-                                title={row?.[j] != null ? String(row[j]) : ""}
+                            {armedNow && (
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                className="h-8 px-2"
+                                onClick={() => openConfirmSingle(u.id, name)}
+                                title="Delete"
                               >
-                                {row?.[j] != null ? String(row[j]) : ""}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Footer: bulk actions + pagination */}
+          <div className="p-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={selected.size === 0}
+                onClick={openConfirmBulk}
+                className="h-9"
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                Delete selected ({selected.size})
+              </Button>
+            </div>
+
+            <div className="ml-auto flex items-center gap-3">
+              <span className="text-xs text-gray-500">
+                Page {currentPage} of {totalPages}
+              </span>
+              <select
+                className="border rounded px-2 py-1 text-sm"
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(parseInt(e.target.value, 10));
+                  setPage(1);
+                }}
+              >
+                {[10, 20, 50].map((n) => (
+                  <option key={n} value={n}>
+                    {n} / page
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8"
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Prev
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Confirm delete modal */}
+        {confirm && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-5">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-amber-600 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold mb-1">Confirm deletion</h3>
+                  <p className="text-sm text-gray-600">
+                    {confirm.mode === "single"
+                      ? `This will permanently delete "${confirm.name}".`
+                      : "This will permanently delete all selected files."}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={cancelConfirm} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="destructive" onClick={confirmDelete} disabled={busy}>
+                  {busy ? "Deleting..." : "Delete"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Info modal */}
+        {infoOpen && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl">
+              <div className="flex items-center justify-between px-4 py-3 border-b">
+                <h3 className="text-base font-semibold">File info</h3>
+                <button
+                  className="p-2 rounded hover:bg-gray-100"
+                  onClick={() => {
+                    setInfoOpen(false);
+                    setInfoData(null);
+                    setPreviewRows(null);
+                    setPreviewError(null);
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4">
+                {infoLoading && <div className="text-sm text-gray-500">Loading...</div>}
+                {!infoLoading && infoData && (
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      <span className="text-gray-500">Name:</span> {basename(infoData.filename)}
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Type:</span>{" "}
+                      {ext(infoData.filename).toUpperCase() || "—"}
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Size:</span> {formatBytes(infoData.file_size)}
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Uploaded:</span> {formatDate(infoData.uploaded_at)}
+                    </div>
+
+                    {/* Preview section */}
+                    <div className="mt-3">
+                      <div className="font-medium mb-2">Preview (first 10×10)</div>
+                      {previewError && (
+                        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1 inline-block">
+                          {previewError}
+                        </div>
+                      )}
+                      {!previewError && !previewRows && (
+                        <div className="text-sm text-gray-500">Generating preview...</div>
+                      )}
+                      {!previewError && previewRows && previewRows.length > 0 && (
+                        <div className="max-h-[360px] overflow-auto border rounded">
+                          <table className="w-full text-xs">
+                            <tbody>
+                              {previewRows.map((row, i) => (
+                                <tr key={i} className="border-b last:border-b-0">
+                                  {row.map((cell, j) => (
+                                    <td key={j} className="px-2 py-1 border-r last:border-r-0 whitespace-pre">
+                                      {cell}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {!previewError && previewRows && previewRows.length === 0 && (
+                        <div className="text-sm text-gray-500">No preview available.</div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-          )}
-            <div className="mt-4 flex justify-end">
-              <Button variant="outline" onClick={() => setInfoOpen(false)}>
-                Close
-              </Button>
+              <div className="px-4 py-3 border-t flex justify-end">
+                <Button onClick={() => setInfoOpen(false)}>Close</Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </RequireAuth>
   );
 }
