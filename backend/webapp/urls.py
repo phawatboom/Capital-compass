@@ -8,16 +8,20 @@ from .views import (
     csrf, register_user,
     login_user,
     logout_user,
-    me
+    me,
+    delete_csv_upload,
 )
 
-# this is the URL configuration for the webapp app
+
+
 urlpatterns = [
     path('upload-csv/', FileUploadView.as_view(), name='upload-csv'),
     path('stocks/', stock_list, name ='stock-list'),
     path('stocks/<int:pk>/', stock_details, name='stock-details'),
     path('csv-uploads/', list_csv_uploads, name='list-csv-uploads'),
     path('csv-uploads/<int:pk>/download/', download_csv, name='download-csv'),
+    path('csv-uploads/<int:pk>/', delete_csv_upload, name='delete-csv'),
+
     # #auth
     # Auth/session endpoints
     path('auth/csrf/', csrf, name='csrf'),
