@@ -31,6 +31,7 @@ class StockData(models.Model):
 class CSVUploadRecord(models.Model):
     filename = models.FileField(upload_to='csv_uploads/')
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    file_size = models.PositiveIntegerField(default=1)
 
     def __str__(self):
-        return f"{self.filename} ({self.uploaded_at})"
+        return f"{self.filename} ({self.uploaded_at}) - {self.file_size} bytes"

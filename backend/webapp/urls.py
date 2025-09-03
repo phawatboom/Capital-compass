@@ -10,6 +10,7 @@ from .views import (
     logout_user,
     me,
     delete_csv_upload,
+    information_file,
 )
 
 
@@ -21,6 +22,7 @@ urlpatterns = [
     path('csv-uploads/', list_csv_uploads, name='list-csv-uploads'),
     path('csv-uploads/<int:pk>/download/', download_csv, name='download-csv'),
     path('csv-uploads/<int:pk>/', delete_csv_upload, name='delete-csv'),
+    path('csv-uploads/<int:pk>/meta/', information_file, name='info-file'),
 
     # #auth
     # Auth/session endpoints
