@@ -310,8 +310,8 @@ def delete_csv_upload(request, pk: int):
         return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
     try:
-        if record.filename and hasattr(record.filename, "path") and os.path.exists(record.filename.path):
-            os.remove(record.filename.path)
+        if record.filename:
+            record.filename.delete(save=False)
     except Exception:
         # ignore file removal errors; proceed to delete db record
         pass
