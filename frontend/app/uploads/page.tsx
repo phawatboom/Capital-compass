@@ -569,7 +569,7 @@ export default function UploadsPage() {
               <div className="space-y-2 text-sm">
                 <div><span className="text-gray-500">Name:</span> {basename(infoData.filename)}</div>
                 <div><span className="text-gray-500">Type:</span> {infoData.type?.toUpperCase() || "—"}</div>
-                <div><span className="text-gray-500">Size:</span> {formatBytes(infoData.size)}</div>
+                <div><span className="text-gray-500">Size:</span> {formatBytes(infoData.file_size)}</div>
                 <div><span className="text-gray-500">Uploaded:</span> {formatDate(infoData.uploaded_at)}</div>
                 {"rows" in infoData && (
                   <div><span className="text-gray-500">Rows:</span> {infoData.rows}</div>
