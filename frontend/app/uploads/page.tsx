@@ -296,40 +296,40 @@ export default function UploadsPage() {
   };
 
   const cancelConfirm = () => setConfirm(null);
-
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file) return;
-    setUploading(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const token = await ensureCsrf();
-      const fd = new FormData();
-      fd.append("file", file);
-      const r = await fetch(`${API_BASE}/upload-csv/`, {
-        method: "POST",
-        body: fd,
-        credentials: "include",
-        headers: { "X-CSRFToken": token },
-      });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        throw new Error(data?.error || `Upload failed (${r.status})`);
-      }
-      setFile(null);
-      setMessage("Uploaded successfully");
-      await fetchUploads();
-    } catch (e: any) {
-      setError(e?.message || "Upload failed");
-    } finally {
-      setUploading(false);
-      setTimeout(() => {
-        setMessage(null);
-        setError(null);
-      }, 2500);
-    }
-  };
+  //
+  // const handleUpload = async (e: React.FormEvent) => {
+  //   e.preventDefault();
+  //   if (!file) return;
+  //   setUploading(true);
+  //   setMessage(null);
+  //   setError(null);
+  //   try {
+  //     const token = await ensureCsrf();
+  //     const fd = new FormData();
+  //     fd.append("file", file);
+  //     const r = await fetch(`${API_BASE}/upload-csv/`, {
+  //       method: "POST",
+  //       body: fd,
+  //       credentials: "include",
+  //       headers: { "X-CSRFToken": token },
+  //     });
+  //     if (!r.ok) {
+  //       const data = await r.json().catch(() => ({}));
+  //       throw new Error(data?.error || `Upload failed (${r.status})`);
+  //     }
+  //     setFile(null);
+  //     setMessage("Uploaded successfully");
+  //     await fetchUploads();
+  //   } catch (e: any) {
+  //     setError(e?.message || "Upload failed");
+  //   } finally {
+  //     setUploading(false);
+  //     setTimeout(() => {
+  //       setMessage(null);
+  //       setError(null);
+  //     }, 2500);
+  //   }
+  // };
 
   // Data preview loader (first sheet/CSV 10x10)
   const loadPreview = useCallback(async (id: number) => {
@@ -409,20 +409,20 @@ export default function UploadsPage() {
   return (
     <RequireAuth>
       <div className="mx-auto w-full max-w-screen-xl px-3 sm:px-4 py-6">
-        <div className="mb-6">
-          <form onSubmit={handleUpload} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <input
-              type="file"
-              className="border rounded px-3 py-2 w-full sm:w-auto"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              accept=".csv,.xlsx"
-            />
-            <Button type="submit" disabled={!file || uploading} className="inline-flex items-center gap-2">
-              <UploadIcon className="w-4 h-4" />
-              {uploading ? "Uploading..." : "Upload"}
-            </Button>
-          </form>
-        </div>
+        {/*<div className="mb-6">*/}
+        {/*  <form onSubmit={handleUpload} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">*/}
+        {/*    <input*/}
+        {/*      type="file"*/}
+        {/*      className="border rounded px-3 py-2 w-full sm:w-auto"*/}
+        {/*      onChange={(e) => setFile(e.target.files?.[0] ?? null)}*/}
+        {/*      accept=".csv,.xlsx"*/}
+        {/*    />*/}
+        {/*    <Button type="submit" disabled={!file || uploading} className="inline-flex items-center gap-2">*/}
+        {/*      <UploadIcon className="w-4 h-4" />*/}
+        {/*      {uploading ? "Uploading..." : "Upload"}*/}
+        {/*    </Button>*/}
+        {/*  </form>*/}
+        {/*</div>*/}
 
         {(message || error) && (
           <div

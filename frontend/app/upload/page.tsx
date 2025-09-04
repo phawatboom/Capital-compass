@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import {format} from "node:url";
 
 /**
  * Configure your API base:
@@ -113,6 +114,14 @@ export default function UploadPage() {
     }
   };
 
+  const formatFileSize = (bytes: number) => {
+      if (bytes === 0) return "0 B";
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 ** 3) return `${(bytes / (1024 ** 2)).toFixed(2)} MB`;
+      return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
+    };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -144,7 +153,7 @@ export default function UploadPage() {
                     <div>
                       <p className="font-medium text-gray-900">{file.name}</p>
                       <p className="text-sm text-gray-500">
-                        {(file.size / 1024 / 1024).toFixed(2)} MB
+                        {(formatFileSize(file.size))}
                       </p>
                     </div>
                   </div>
