@@ -1,4 +1,3 @@
-# file: backend/webapp/views.py
 import csv
 import io
 import os
@@ -16,15 +15,19 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Stock, StockData, CSVUploadRecord
+from .models import Stock, StockData, CSVUploadRecord, UserProfile
 from datetime import date, datetime
 from django.http import FileResponse
+from django.contrib.auth import update_session_auth_hash
+from rest_framework.decorators import parser_classes
 
 from .serializers import (
     CSVUploadSerializer,
     StockSerializer,
     StockDataSerializer,
     CSVUploadRecordSerializer,
+    UserProfileSerializer,
+    PasswordChangeSerializer,
 )
 
 def _parse_date(date_str: str) -> date:
@@ -403,16 +406,125 @@ def logout_user(request):
 
 
 # --- Who am I (for frontend to read role or user state) ---
+
 @api_view(["GET"])
 def me(request):
     u = request.user
+    if not u.is_authenticated:
+        return Response({
+            "authenticated": False,
+            "username": None,
+            "is_staff": False,
+            "is_superuser": False,
+            "is_moderator": False,
+            "avatar_url": None,
+            "email": None,
+        })
+
+    # ensure a profile exists
+    profile, _ = UserProfile.objects.get_or_create(user=u)
+    avatar_url = profile.avatar.url if profile.avatar else None
+    if avatar_url:
+        avatar_url = request.build_absolute_uri(avatar_url)
+
     return Response({
-        "authenticated": u.is_authenticated,
-        "username": u.username if u.is_authenticated else None,
-        "is_staff": u.is_staff if u.is_authenticated else False,
-        "is_superuser": u.is_superuser if u.is_authenticated else False,
+        "authenticated": True,
+        "username": u.username,
+        "email": u.email,
+        "is_staff": u.is_staff,
+        "is_superuser": u.is_superuser,
         "is_moderator": (
             u.groups.filter(name="mods").exists() or
             u.has_perm("webapp.can_moderate")
-        ) if u.is_authenticated else False,
+        ),
+        "avatar_url": avatar_url,
     })
+
+
+# ------- New: profile read/update -------
+@api_view(["GET", "PUT", "PATCH"])
+@permission_classes([IsAuthenticated])
+def profile_view(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    if request.method in ("PUT", "PATCH"):
+        serializer = UserProfileSerializer(
+            profile, data=request.data, partial=(request.method == "PATCH"), context={"request": request}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        print("PROFILE ERRORS:", serializer.errors)
+        return Response(serializer.errors, status=400)
+
+    serializer = UserProfileSerializer(profile, context={"request": request})
+    return Response(serializer.data)
+
+
+# ------- New: avatar upload/replace & delete -------
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def profile_avatar(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == "DELETE":
+        try:
+            if profile.avatar:
+                profile.avatar.delete(save=False)
+            profile.avatar = None
+            profile.save(update_fields=["avatar"])
+        except Exception:
+            pass
+        return Response({"avatar_url": None})
+
+    # POST: upload/replace
+    file_obj = request.data.get("avatar")
+    if not file_obj:
+        return Response({"error": "No file provided (field name 'avatar')."}, status=400)
+
+    # Optional validation (size/type)
+    if file_obj.size > 5 * 1024 * 1024:
+        return Response({"error": "Max avatar size is 5MB."}, status=400)
+    if not (file_obj.content_type or "").startswith("image/"):
+        return Response({"error": "Avatar must be an image."}, status=400)
+
+    # Replace existing file cleanly
+    if profile.avatar:
+        try:
+            profile.avatar.delete(save=False)
+        except Exception:
+            pass
+
+    profile.avatar = file_obj
+    profile.save(update_fields=["avatar"])
+
+    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    return Response({"avatar_url": avatar_url})
+
+
+# ------- New: change password -------
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    serializer = PasswordChangeSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+
+    current_password = serializer.validated_data["current_password"]
+    new_password = serializer.validated_data["new_password"]
+
+    user = request.user
+    if not user.check_password(current_password):
+        return Response({"error": "Current password is incorrect."}, status=400)
+
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as e:
+        return Response({"errors": e.messages}, status=400)
+
+    user.set_password(new_password)
+    user.save()
+    # keep session valid after password change
+    update_session_auth_hash(request, user)
+
+    return Response({"detail": "Password changed successfully."})

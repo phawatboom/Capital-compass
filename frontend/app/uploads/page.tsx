@@ -646,17 +646,19 @@ export default function UploadsPage() {
                               <ShieldAlert className="w-4 h-4" />
                             </button>
 
-                            {armedNow && (
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                className="h-8 px-2"
-                                onClick={() => openConfirmSingle(u.id, name)}
-                                title="Delete"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            )}
+                            <div className="h-8">
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  className={`h-8 px-2 transition-opacity duration-200 ${
+                                    armedNow ? "opacity-100" : "opacity-0 pointer-events-none"
+                                  }`}
+                                  onClick={() => openConfirmSingle(u.id, name)}
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                            </div>
                           </div>
                         </td>
                       </tr>

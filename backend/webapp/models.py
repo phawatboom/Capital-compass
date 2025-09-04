@@ -1,4 +1,7 @@
+from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 # Create your models here.
 class Stock(models.Model):
@@ -35,3 +38,25 @@ class CSVUploadRecord(models.Model):
 
     def __str__(self):
         return f"{self.filename} ({self.uploaded_at}) - {self.file_size} bytes"
+
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile"
+    )
+    display_name = models.CharField(max_length=150, blank=True)
+    bio = models.TextField(blank=True)
+    timezone = models.CharField(max_length=64, blank=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+
+    organization = models.CharField(max_length=150, blank=True)
+    job_title = models.CharField(max_length=150, blank=True)
+    notify_email_reports = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Profile({self.user.username})"
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def ensure_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.get_or_create(user=instance)

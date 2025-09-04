@@ -6,7 +6,33 @@ import { BarChart3, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/app/lib/authContext";
 
+/** Small circular avatar with image or initial fallback */
+function AvatarCircle({
+  username,
+  avatarUrl,
+  size = 32, // px
+}: {
+  username?: string;
+  avatarUrl?: string | null;
+  size?: number;
+}) {
+  const initial = (username?.trim()?.[0] ?? "U").toUpperCase();
+  return (
+    <div
+      className="overflow-hidden rounded-full ring-1 ring-border bg-gray-100 text-gray-600 grid place-items-center"
+      style={{ width: size, height: size }}
+    >
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={avatarUrl} alt="Your profile" className="h-full w-full object-cover" />
+      ) : (
+        <span className="text-sm font-semibold">{initial}</span>
+      )}
+    </div>
+  );
+}
 
+/** Simple portal for the mobile drawer */
 function Portal({ children }: { children: React.ReactNode }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
 
@@ -27,18 +53,58 @@ function Portal({ children }: { children: React.ReactNode }) {
 
 export default function SiteHeader() {
   const { me, loading, logout } = useAuth();
-  const { authenticated, username } = me;
+  const { authenticated, username } = me as any;
+
   const [open, setOpen] = useState(false);
+
+  // Optional: fetch avatar URL if your auth context doesn't include it.
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    if (!authenticated) {
+      setAvatarUrl(null);
+      return;
+    }
+
+    // If your auth context already has an avatar URL, prefer it
+    const inContext =
+      (me as any)?.avatarUrl ||
+      (me as any)?.avatar_url ||
+      null;
+
+    if (inContext) {
+      setAvatarUrl(inContext);
+      return;
+    }
+
+    // Otherwise, fetch once from /api/me
+    const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/me/`, { credentials: "include" });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!ignore) setAvatarUrl(data?.avatar_url ?? null);
+      } catch {
+        // ignore errors; fallback to initial
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [authenticated, me]);
 
   // Lock scroll while the drawer is open; restore on unmount.
   useEffect(() => {
-    if (open) {
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
-    }
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
   // Close on Escape
@@ -75,8 +141,20 @@ export default function SiteHeader() {
     if (loading) return <span className="opacity-60">…</span>;
     if (authenticated) {
       return (
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:inline text-gray-700 dark:text-gray-200">Hi, {username}</span>
+        <div className="flex items-center gap-4">
+          {/* Profile link with avatar (desktop) */}
+          <Link
+            href="/profile"
+            className="group inline-flex items-center gap-2"
+            aria-label="Your profile"
+            title="Your profile"
+          >
+            <AvatarCircle username={username} avatarUrl={avatarUrl} />
+            <span className="hidden sm:inline text-gray-700 dark:text-gray-200 group-hover:underline">
+              Profile
+            </span>
+          </Link>
+
           <Button size="sm" onClick={logout}>Log out</Button>
         </div>
       );
@@ -111,9 +189,6 @@ export default function SiteHeader() {
         {/* Desktop auth */}
         <div className="hidden md:flex items-center gap-4">
           <AuthArea />
-          {/*<Link href="/upload">*/}
-          {/*  /!*<Button>Get Started</Button>*!/*/}
-          {/*</Link>*/}
         </div>
 
         {/* Mobile hamburger */}
@@ -160,6 +235,25 @@ export default function SiteHeader() {
                 <X className="h-6 w-6" />
               </Button>
             </div>
+
+            {/* Mobile profile link (visible when authenticated) */}
+            {(authenticated && !loading) && (
+              <div className="px-4 pt-3">
+                <Link
+                  href="/profile"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  aria-label="Your profile"
+                  title="Your profile"
+                >
+                  <AvatarCircle username={username} avatarUrl={avatarUrl} size={40} />
+                  <div className="flex flex-col">
+                    <span className="font-medium">{username}</span>
+                    <span className="text-sm text-gray-500 dark:text-gray-400">View profile</span>
+                  </div>
+                </Link>
+              </div>
+            )}
 
             <div className="flex flex-col gap-3 px-4 py-6 text-base">
               <NavLinks onClick={() => setOpen(false)} />
