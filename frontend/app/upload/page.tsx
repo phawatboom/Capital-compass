@@ -38,8 +38,8 @@ export default function UploadPage() {
         setFile(null);
         return;
       }
-      if (selectedFile.size > 20 * 1024 * 1024) {
-        setError("File size must be less than 20MB");
+      if (selectedFile.size > 200 * 1024 * 1024) {
+        setError("File size must be less than 200MB");
         setFile(null);
         return;
       }
