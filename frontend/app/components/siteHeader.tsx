@@ -134,6 +134,9 @@ export default function SiteHeader() {
       <Link href="/upload" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Upload Data
       </Link>
+      <Link href="/stocks" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
+        Stocks
+      </Link>
     </>
   );
 
