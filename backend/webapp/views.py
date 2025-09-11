@@ -42,163 +42,141 @@ def _parse_date(date_str: str) -> date:
 
 # Helper function to process a single DataFrame (from CSV or Excel sheet)
 def process_data(df, file, data_type, upload_record):
-    # Common processing logic for different data types
     try:
-        # ---- Logic for Prices sheet ----
-        if 'line#' in df.iloc[3].astype(str).str.lower().values and data_type == 'price':
+        data_to_process = []
+        date_col_index = None
+        stock_names_start_index = None
+        data_start_row_index = None
+
+        # ---- Determine sheet structure based on data_type ----
+        if data_type == 'price' and 'line#' in df.iloc[3].astype(str).str.lower().values:
             header_row_index = 3
             date_col_index = 1
             stock_names_start_index = 2
-
-            header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
-            stock_names = [name.strip() for name in header_series.dropna().tolist() if
-                           name.strip() and 'un' in name.lower()]
-
-            if not stock_names:
-                raise ValueError("No stock names found in header.")
-
-            stocks = {name: Stock.objects.get_or_create(name=name)[0] for name in stock_names}
-
-            data_df = df.iloc[header_row_index + 1:].reset_index(drop=True)
-            for _, row in data_df.iterrows():
-                try:
-                    date_str = str(row.iloc[date_col_index]).strip()
-                    if not date_str:
-                        continue
-                    try:
-                        date_object = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    except ValueError:
-                        date_object = datetime.strptime(date_str, '%d-%b-%Y').date()
-                except (IndexError, ValueError):
-                    continue
-
-                for i, stock_name in enumerate(stock_names):
-                    value_raw = row.iloc[stock_names_start_index + i]
-                    value = None
-
-                    if isinstance(value_raw, (int, float)):
-                        value = value_raw
-                    elif isinstance(value_raw, str):
-                        value_str = value_raw.strip()
-                        if value_str not in ["#N/A", ""]:
-                            try:
-                                value = float(value_str)
-                            except ValueError:
-                                continue
-
-                    stock_obj = stocks[stock_name]
-                    StockData.objects.update_or_create(
-                        stock=stock_obj,
-                        date=date_object,
-                        data_type=data_type,
-                        defaults={'value': value}
-                    )
-
-        # ---- Logic for Returns sheet ----
-        if 'date' in df.iloc[5].astype(str).str.lower().values and data_type == 'return':
+            data_start_row_index = header_row_index + 1
+        elif data_type == 'return' and 'date' in df.iloc[5].astype(str).str.lower().values:
             header_row_index = 5
             date_col_index = 0
             stock_names_start_index = 1
-
-            header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
-            stock_names = [name.strip() for name in header_series.dropna().tolist() if
-                           name.strip() and 'un' in name.lower()]
-
-            if not stock_names:
-                raise ValueError("No stock names found in header.")
-
-            stocks = {name: Stock.objects.get_or_create(name=name)[0] for name in stock_names}
-
-            data_df = df.iloc[header_row_index + 1:].reset_index(drop=True)
-            for _, row in data_df.iterrows():
-                try:
-                    date_str = str(row.iloc[date_col_index]).strip()
-                    if not date_str:
-                        continue
-                    try:
-                        date_object = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    except ValueError:
-                        date_object = datetime.strptime(date_str, '%d-%b-%Y').date()
-                except (IndexError, ValueError):
-                    continue
-
-                for i, stock_name in enumerate(stock_names):
-                    value_raw = row.iloc[stock_names_start_index + i]
-                    value = None
-
-                    if isinstance(value_raw, str):
-                        value_str = value_raw.strip()
-                        if value_str not in ["#N/A", ""]:
-                            if '%' in value_str:
-                                value = float(value_str.strip('%')) / 100.0
-                            else:
-                                try:
-                                    value = float(value_str)
-                                except ValueError:
-                                    continue
-
-                    stock_obj = stocks[stock_name]
-                    StockData.objects.update_or_create(
-                        stock=stock_obj,
-                        date=date_object,
-                        data_type=data_type,
-                        defaults={'value': value}
-                    )
-
-        # ---- Logic for BQL Query sheet ----
-        if 'dates' in df.iloc[1].astype(str).str.lower().values and data_type == 'equity':
+            data_start_row_index = header_row_index + 1
+        elif data_type == 'equity' and 'dates' in df.iloc[1].astype(str).str.lower().values:
             header_row_index = 0
             date_col_index = 0
             stock_names_start_index = 1
             data_start_row_index = 2
-            # Look for 'un equity' in stock names
-            header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
-            stock_names = [name.strip() for name in header_series.dropna().tolist() if
-                           name.strip() and 'un equity' in name.lower()]
+        else:
+            raise ValueError(f"Could not determine format for data type: {data_type}")
 
-            if not stock_names:
-                raise ValueError("No stock names found in header.")
-            # Remove ' Equity' suffix if present
-            cleaned_stock_names = [name.replace(' Equity', '') for name in stock_names]
-            stocks = {name: Stock.objects.get_or_create(name=name)[0] for name in cleaned_stock_names}
+        # ---- Find and prepare stock objects ----
+        header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
 
-            data_df = df.iloc[data_start_row_index:].reset_index(drop=True)
-            for _, row in data_df.iterrows():
-                try:
-                    date_str = str(row.iloc[date_col_index]).strip()
-                    if not date_str:
-                        continue
-                    try:
-                        date_object = datetime.strptime(date_str, '%d/%m/%Y').date()
-                    except ValueError:
-                        date_object = datetime.strptime(date_str, '%Y-%m-%d').date()
-                except (IndexError, ValueError):
+        exchange_codes = [' UN', ' UW', ' UQ', ' UF', '/B UN']
+
+        if data_type == 'equity':
+            stock_names = [
+                name.strip() for name in header_series.dropna().tolist()
+                if 'equity' in name.lower() and any(code.lower() in name.lower() for code in exchange_codes)
+            ]
+            cleaned_stock_names = [name.replace(' Equity', '').strip() for name in stock_names]
+        else:
+            stock_names = [
+                name.strip() for name in header_series.dropna().tolist()
+                if any(code.lower() in name.lower() for code in exchange_codes)
+            ]
+            cleaned_stock_names = stock_names
+
+        if not cleaned_stock_names:
+            raise ValueError("No valid stock names found in header.")
+
+        # Bulk get_or_create for stocks
+        stocks_map = {name: Stock.objects.get_or_create(name=name)[0] for name in cleaned_stock_names}
+
+        # ---- Process data points and collect them into a list ----
+        data_df = df.iloc[data_start_row_index:].reset_index(drop=True)
+        for _, row in data_df.iterrows():
+            try:
+                date_str = str(row.iloc[date_col_index]).strip()
+                if not date_str:
                     continue
+                date_object = _parse_date(date_str)
+            except (IndexError, ValueError):
+                continue
 
-                for i, stock_name in enumerate(cleaned_stock_names):
-                    value_raw = row.iloc[stock_names_start_index + i]
-                    value = None
+            for i, stock_name in enumerate(cleaned_stock_names):
+                value_raw = row.iloc[stock_names_start_index + i]
+                value = None
 
-                    if isinstance(value_raw, (int, float)):
-                        value = value_raw
-                    elif isinstance(value_raw, str):
-                        value_str = value_raw.strip()
-                        if value_str not in ["#N/A", ""]:
+                # Value parsing logic
+                if isinstance(value_raw, (int, float)):
+                    value = value_raw
+                elif isinstance(value_raw, str):
+                    value_str = value_raw.strip()
+                    if value_str not in ["#N/A", ""]:
+                        if data_type == 'return' and '%' in value_str:
+                            try:
+                                value = float(value_str.strip('%')) / 100.0
+                            except ValueError:
+                                continue
+                        else:
                             try:
                                 value = float(value_str)
                             except ValueError:
                                 continue
 
-                    stock_obj = stocks[stock_name]
-                    StockData.objects.update_or_create(
-                        stock=stock_obj,
-                        date=date_object,
-                        data_type=data_type,
-                        defaults={'value': value}
+                data_to_process.append({
+                    'stock': stocks_map[stock_name],
+                    'date': date_object,
+                    'data_type': data_type,
+                    'value': value,
+                })
+
+        # ---- Bulk operations ----
+        # 1. Get existing records in a single query
+        existing_records_filter = {
+            'stock__in': [d['stock'] for d in data_to_process],
+            'data_type': data_type,
+            'date__in': [d['date'] for d in data_to_process]
+        }
+        existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id', 'date', 'id')
+
+        # Create a map for fast lookup
+        existing_records_map = {
+            (rec['stock_id'], rec['date']): rec['id']
+            for rec in existing_records
+        }
+
+        # 2. Separate into lists for creation and update
+        records_to_create = []
+        records_to_update = []
+
+        for data_point in data_to_process:
+            stock_id = data_point['stock'].id
+            date_val = data_point['date']
+
+            if (stock_id, date_val) in existing_records_map:
+                record_id = existing_records_map[(stock_id, date_val)]
+                records_to_update.append(
+                    StockData(
+                        id=record_id,
+                        stock=data_point['stock'],
+                        date=date_val,
+                        data_type=data_point['data_type'],
+                        value=data_point['value']
                     )
+                )
+            else:
+                records_to_create.append(StockData(**data_point))
+
+        # 3. Perform bulk operations
+        if records_to_create:
+            StockData.objects.bulk_create(records_to_create, batch_size=5000)
+
+        if records_to_update:
+            StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
 
     except Exception as e:
         raise Exception(f"Failed to process {file.name}, data type: {data_type}. Error: {e}")
+
 
 # View to handle file uploads
 # --------------------------------------------------------------------------------------
@@ -271,29 +249,39 @@ class FileUploadView(APIView):
 
 # List all stocks.
 @api_view(['GET'])
-# @permission_classes([AllowAny])
 def stock_list(request):
-    stocks = Stock.objects.all()
-    serializer = StockSerializer(stocks, many=True)
-    return Response(serializer.data, status=status.HTTP_200_OK)
+    """
+    Returns a list of all stocks (id and name only)
+    """
+    stocks = Stock.objects.all().values("id", "name")
+    return Response(list(stocks), status=status.HTTP_200_OK)
 
 
-# Retrieve details and all data points for a specific stock.
 @api_view(['GET'])
-# @permission_classes([AllowAny])
 def stock_details(request, pk):
     try:
         stock = Stock.objects.get(pk=pk)
     except Stock.DoesNotExist:
-        return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "Stock not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    stock_serializer = StockSerializer(stock)
-    stock_data_list = StockData.objects.filter(stock=stock).order_by('date')
-    stock_data_serializer = StockDataSerializer(stock_data_list, many=True)
+    data = {}
+    for entry in StockData.objects.filter(stock=stock).order_by("date"):
+        if entry.date not in data:
+            data[entry.date] = {"date": entry.date, "price": None, "return": None, "equity": None}
+
+        # Replace NaN with None
+        value = entry.value
+        if value != value:  # NaN check
+            value = None
+
+        data[entry.date][entry.data_type] = value
+
+    rows = sorted(data.values(), key=lambda x: x["date"])
 
     return Response({
-        "stock_info": stock_serializer.data,
-        "data_points": stock_data_serializer.data
+        "id": stock.id,
+        "name": stock.name,
+        "data": rows
     }, status=status.HTTP_200_OK)
 
 
