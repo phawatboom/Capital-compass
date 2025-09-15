@@ -180,6 +180,19 @@ def setup_logging(out_dir: Path) -> logging.Logger:
     logger.addHandler(sh)
     return logger
 
+def get_unique_filepath(filepath: Path) -> Path:
+    """If a file path exists, appends a version number (_v1, _v2, etc.)."""
+    if not filepath.exists():
+        return filepath
+    parent = filepath.parent
+    stem = filepath.stem
+    suffix = filepath.suffix
+    version = 1
+    while True:
+        new_filepath = parent / f"{stem}_v{version}{suffix}"
+        if not new_filepath.exists():
+            return new_filepath
+        version += 1
 
 # =========================
 # Data utils
@@ -960,8 +973,8 @@ def run_pipeline(cfg: Config, model_name: str) -> None:
         if preds.empty:
             logger.warning(f"No results for horizon {name} — skipping saves.")
             continue
-        preds_path = out_dir / f"predictions_{name}.csv"
-        metrics_path = out_dir / f"metrics_{name}.csv"
+        preds_path = get_unique_filepath(out_dir / f"predictions_{name}.csv")
+        metrics_path = get_unique_filepath(out_dir / f"metrics_{name}.csv")
         preds.sort_values(["Date","ticker"]).to_csv(preds_path, index=False)
         metrics.to_csv(metrics_path, index=False)
         logger.info(f"Saved: {preds_path.name} ({len(preds):,} rows), {metrics_path.name} ({len(metrics):,} rows)")
@@ -973,8 +986,11 @@ def run_pipeline(cfg: Config, model_name: str) -> None:
             coverage = float(np.mean(np.isfinite(preds["y_prob_cal"].to_numpy())))
         summary_rows.append(dict(horizon=name, rows=int(len(preds)), auc=float(auc_all), coverage=coverage))
 
+        summary_rows.append(dict(horizon=name, rows=int(len(preds)), auc=float(auc_all), coverage=coverage))
+
     if summary_rows:
-        pd.DataFrame(summary_rows).to_csv(out_dir / "summary.csv", index=False)
+        summary_path = get_unique_filepath(out_dir / "summary.csv")
+        pd.DataFrame(summary_rows).to_csv(summary_path, index=False)
 
     # Run meta
     meta = {
@@ -991,7 +1007,8 @@ def run_pipeline(cfg: Config, model_name: str) -> None:
             "sklearn": __import__("sklearn").__version__,
         },
     }
-    with open(out_dir / "run_meta.json", "w", encoding="utf-8") as fh:
+    meta_path = get_unique_filepath(out_dir / "run_meta.json")
+    with open(meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2, default=str)
     logger.info("Done. Artifacts: predictions_*.csv, metrics_*.csv, summary.csv, run_meta.json")
 
@@ -1152,7 +1169,8 @@ def forecast_one_horizon(
         y_pred[lo] = 0
         abstained = ~(hi | lo)
 
-    return pd.DataFrame({
+    # Create the dictionary for the standard prediction output
+    output_data = {
         "forecast_date": forecast_panel["Date"].values,
         "ticker": tickers_fc,
         "horizon": horizon_name,
@@ -1166,7 +1184,12 @@ def forecast_one_horizon(
         "threshold": threshold_used,
         "y_pred": y_pred,
         "abstained": abstained,
-    })
+    }
+    # Extract the feature values from the forecast panel and add them to the output
+    feature_values = forecast_panel[feat_cols].reset_index(drop=True)
+    final_output_df = pd.concat([pd.DataFrame(output_data), feature_values], axis=1)
+    
+    return final_output_df
 
 
 def run_forecast(cfg: Config, model_name: str) -> None:
@@ -1229,7 +1252,10 @@ def run_forecast(cfg: Config, model_name: str) -> None:
         return
 
     final_fc = pd.concat(all_fc, ignore_index=True).sort_values(["horizon", "ticker"])
-    out_csv = out_dir / f"forecast_{pd.Timestamp.now().strftime('%Y%m%d')}.csv"
+
+    base_csv_path = out_dir / f"forecast_{pd.Timestamp.now().strftime('%Y%m%d')}.csv"
+    out_csv = get_unique_filepath(base_csv_path)
+    
     final_fc.to_csv(out_csv, index=False, float_format="%.6f")
     logger.info(f"Saved forecast file: {out_csv.name} ({len(final_fc):,} rows)")
 
@@ -1249,10 +1275,10 @@ def run_forecast(cfg: Config, model_name: str) -> None:
         },
         "artifacts": {"forecast_csv": out_csv.name},
     }
-    with open(out_dir / "run_meta_forecast.json", "w", encoding="utf-8") as fh:
+    meta_path = get_unique_filepath(out_dir / "run_meta_forecast.json")
+    with open(meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2, default=str)
     logger.info("Forecast complete. Artifacts: forecast_YYYYMMDD.csv, run_meta_forecast.json")
-
 
 # =========================
 # Entry
@@ -1288,25 +1314,33 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
-    cfg = Config(
-        excel_path=args.excel,
-        sheet_name=args.sheet,
-        output_dir=args.out,
-        with_market=args.with_market,
-        market_sheet=args.market_sheet,
-        market_source=args.market_source,
-        market_start=args.market_start,
-        train_years=args.train_years,
-        validation_years=args.val_years,
-        embargo_days=args.embargo,
-        random_state=args.random_state,
-        n_jobs=args.n_jobs,
-        min_valid_frac=args.min_valid_frac,
-        min_coverage=args.min_coverage,
-        threshold_fixed=args.threshold_fixed,
-        threshold_rule=args.threshold_rule,
-        min_exp_move_abs=args.min_exp_move_abs,
-    )
+    # Create a dictionary of arguments to override Config defaults
+    # This ensures that only arguments explicitly provided on the command line
+    # will overwrite the defaults set in the Config class.
+    override_args = {
+        "excel_path": args.excel,
+        "sheet_name": args.sheet,
+        "output_dir": args.out,
+        "with_market": args.with_market,
+        "market_sheet": args.market_sheet,
+        "market_source": args.market_source,
+        "market_start": args.market_start,
+        "train_years": args.train_years,
+        "validation_years": args.val_years,
+        "embargo_days": args.embargo,
+        "random_state": args.random_state,
+        "n_jobs": args.n_jobs,
+        "min_valid_frac": args.min_valid_frac,
+        "min_coverage": args.min_coverage,
+        "threshold_fixed": args.threshold_fixed,
+        "threshold_rule": args.threshold_rule,
+        "min_exp_move_abs": args.min_exp_move_abs,
+    }
+    # Filter out any arguments that were not provided (i.e., are None)
+    # so they don't overwrite the Config defaults.
+    final_args = {k: v for k, v in override_args.items() if v is not None}
+    
+    cfg = Config(**final_args)
     if args.mode == "forecast":
         run_forecast(cfg, model_name=args.model)
     else:
