@@ -140,14 +140,14 @@ class Config:
     # Thresholding / coverage control
     threshold_grid: List[float] = field(default_factory=lambda: [round(x, 2) for x in np.arange(0.55, 0.91, 0.01)])
     min_coverage: Optional[float] = None  # e.g., 0.40 for 40% minimum coverage
-    tau_fixed: Optional[float] = None      # fixed τ if provided
-    tau_rule: str = "coverage"            # 'coverage' or 'none'
+    threshold_fixed: Optional[float] = None      # fixed τ if provided
+    threshold_rule: str = "coverage"            # 'coverage' or 'none'
     n_jobs: int = -1                       # parallelism for param scoring
     min_valid_frac: float = 0.70           # min non-NaN fraction per ticker
 
     # Calibration & magnitude
     calib_frac: float = 0.20  # held-out slice inside outer-train (by date)
-    conformal_alpha: float = 0.10
+    conformal_alpha: float = 0.10  # 90% prediction intervals
 
     # Magnitude model (fast, stable defaults)
     hgb_max_depth: int = 3
@@ -538,16 +538,16 @@ def apply_calibrator(iso: Optional[IsotonicRegression], probs: np.ndarray) -> np
 # Threshold selection (coverage-driven)
 # =========================
 
-def choose_tau_by_coverage(p_mr: np.ndarray, thresholds: List[float], min_coverage: float) -> Tuple[float, float]:
+def choose_threshold_by_coverage(p_mr: np.ndarray, thresholds: List[float], min_coverage: float) -> Tuple[float, float]:
     """Pick the *largest* τ whose symmetric coverage meets/exceeds `min_coverage`.
     Coverage(τ) = mean( p>=τ or p<=1-τ ). If none meet, return τ=0.5 (coverage=1.0).
     """
     p = np.asarray(p_mr, dtype=float)
-    for tau in sorted([t for t in thresholds if t > 0.5], reverse=True):
-        covered = (p >= tau) | (p <= (1.0 - tau))
+    for threshold in sorted([t for t in thresholds if t > 0.5], reverse=True):
+        covered = (p >= threshold) | (p <= (1.0 - threshold))
         cov = float(np.mean(covered))
         if cov + 1e-12 >= float(min_coverage):
-            return float(tau), cov
+            return float(threshold), cov
     return 0.5, 1.0
 
 
@@ -669,8 +669,8 @@ def run_one_horizon(panel: pd.DataFrame, horizon_name: str, cfg: Config, model_n
                 except Exception:
                     prs.append(0.0)
                 if cfg.min_coverage is not None:
-                    tau_cv, _ = choose_tau_by_coverage(pro, cfg.threshold_grid, cfg.min_coverage)
-                    hi = pro >= tau_cv; lo = pro <= (1.0 - tau_cv)
+                    threshold_cv, _ = choose_threshold_by_coverage(pro, cfg.threshold_grid, cfg.min_coverage)
+                    hi = pro >= threshold_cv; lo = pro <= (1.0 - threshold_cv)
                     mask = (hi | lo)
                     if mask.any() and np.unique(yv[mask]).size == 2:
                         yp = np.full_like(pro, ABSTAIN, int)
@@ -763,21 +763,21 @@ def run_one_horizon(panel: pd.DataFrame, horizon_name: str, cfg: Config, model_n
         action_conf = np.maximum(p, 1.0-p)
 
         # Optional coverage-driven decisioning
-        tau_used = np.nan
+        threshold_used = np.nan
         coverage_val = np.nan
         y_pred = np.full(p.shape[0], ABSTAIN, dtype=int)
         abstained = np.ones(p.shape[0], dtype=bool)
         hi = np.zeros_like(p, dtype=bool)
         lo = np.zeros_like(p, dtype=bool)
-        if cfg.tau_fixed is not None:
-            tau_used = float(cfg.tau_fixed)
-            hi = p >= tau_used
-            lo = p <= (1.0 - tau_used)
-        elif cfg.min_coverage is not None and cfg.tau_rule == "coverage":
-            tau_used, coverage_val = choose_tau_by_coverage(p, cfg.threshold_grid, cfg.min_coverage)
-            hi = p >= tau_used
-            lo = p <= (1.0 - tau_used)
-        # else: tau_rule == 'none' or no min_coverage -> no abstain, keep defaults
+        if cfg.threshold_fixed is not None:
+            threshold_used = float(cfg.threshold_fixed)
+            hi = p >= threshold_used
+            lo = p <= (1.0 - threshold_used)
+        elif cfg.min_coverage is not None and cfg.threshold_rule == "coverage":
+            threshold_used, coverage_val = choose_threshold_by_coverage(p, cfg.threshold_grid, cfg.min_coverage)
+            hi = p >= threshold_used
+            lo = p <= (1.0 - threshold_used)
+        # else: threshold_rule == 'none' or no min_coverage -> no abstain, keep defaults
         if hi.any() or lo.any():
             y_pred[hi] = 1  # MR
             y_pred[lo] = 0  # Momentum
@@ -797,7 +797,7 @@ def run_one_horizon(panel: pd.DataFrame, horizon_name: str, cfg: Config, model_n
             "exp_move": exp_move,
             "pi_low": low_move,
             "pi_high": high_move,
-            "tau": tau_used,
+            "threshold": threshold_used,
             "y_pred": y_pred,
             "abstained": abstained,
         })
@@ -1035,8 +1035,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--market_start", default="1990-01-01", help="Start date for fetched market series (default: 1990-01-01)")
     # Coverage / threshold options
     p.add_argument("--min_coverage", type=float, default=None, help="Minimum decision coverage (0-1). Example: 0.4 ⇒ ≥40% of names labeled MR/MO; others abstain. Default: None (no abstain)")
-    p.add_argument("--tau_fixed", type=float, default=None, help="Use a fixed τ (e.g., 0.75). Overrides coverage rule if set.")
-    p.add_argument("--tau_rule", default="coverage", choices=["coverage","none"], help="Threshold selection rule when --min_coverage is set. Default: coverage")
+    p.add_argument("--threshold_fixed", type=float, default=None, help="Use a fixed τ (e.g., 0.75). Overrides coverage rule if set.")
+    p.add_argument("--threshold_rule", default="coverage", choices=["coverage","none"], help="Threshold selection rule when --min_coverage is set. Default: coverage")
     p.set_defaults(with_market=True)
     return p.parse_args()
 
@@ -1058,8 +1058,8 @@ def main():
         n_jobs=args.n_jobs,
         min_valid_frac=args.min_valid_frac,
         min_coverage=args.min_coverage,
-        tau_fixed=args.tau_fixed,
-        tau_rule=args.tau_rule,
+        threshold_fixed=args.threshold_fixed,
+        threshold_rule=args.threshold_rule,
     )
     run_pipeline(cfg, model_name=args.model)
 

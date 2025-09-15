@@ -1,0 +1,888 @@
+
+#!/usr/bin/env python3
+"""
+Mean-Reversion Likelihood Model — Improved (returns-as-percent support)
+----------------------------------------------------------------------
+Focus: modeling only (no web). Expects an Excel sheet of *daily simple returns*
+formatted as percentages (e.g., "0.56%").
+
+Highlights
+• Robust Excel loader for percent strings → decimal returns
+• Returns hygiene: winsorization (±10% default), NaN guards
+• Features from returns only (serial corr, sign persistence, momentum, vol, z-score over price index)
+• Labels: mean-reversion vs recent momentum, with abs-move gate
+• Walk-forward by trading-day counts with horizon-aware purge (+ optional embargo)
+• Inner CV scoring = neg_log_loss; class_weight="balanced"
+• Two-sided abstain band with τ>0.5, coverage-weighted F1 for threshold choice
+• Per-window metrics + CSV/plots/models (optional)
+
+Run
+  python mean_reversion_model_improved.py --excel "MXUS_Data.xlsx" --sheet "Returns"
+
+Requirements
+  pip install pandas numpy scikit-learn openpyxl matplotlib joblib
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Union
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from pandas.tseries.offsets import BDay
+
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
+from sklearn.metrics import (
+    roc_auc_score,
+    f1_score,
+    precision_recall_fscore_support,
+    balanced_accuracy_score,
+    roc_curve,
+)
+from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from joblib import dump
+
+# Progress bar (safe fallback if tqdm is unavailable)
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover
+    def tqdm(iterable=None, **kwargs):
+        return iterable
+
+
+# =========================
+# Configuration
+# =========================
+
+THIS_DIR = Path(__file__).resolve().parent
+DEFAULT_EXCEL_CANDIDATES: List[str] = ["MXUS_Data.xlsx"]
+ABSTAIN = -1  # label used for abstentions in mean-reversion classification
+
+
+@dataclass
+class MeanReversionConfig:
+    # I/O
+    excel_path: str | Path = field(default=str(THIS_DIR / "MXUS_Data.xlsx"))
+    sheet_name: str = "Returns"
+    output_dir: str | Path = "results"
+
+    # Labeling
+    abs_move_threshold: float = 0.005  # 0.5% min magnitude for a "real" move
+
+    # Walk-forward windowing
+    train_years: int = 3
+    validation_years: int = 1
+    trading_days_per_year: int = 252
+    embargo_days: int = 5  # optional extra gap between train and validation
+
+    # Regularization search
+    alpha_grid: List[float] = field(default_factory=lambda: [0.0, 0.5, 1.0])  # 0=ridge, 1=lasso
+    inner_cv_folds: int = 5
+    reg_strengths_C: List[float] = field(default_factory=lambda: list(np.logspace(-4, 4, 30)))
+
+    # Threshold sweep (two-sided abstain uses τ > 0.5)
+    threshold_grid: List[float] = field(
+        default_factory=lambda: [round(x, 2) for x in np.arange(0.55, 0.86, 0.01)]
+    )
+
+    # Horizons: (horizon_name, forward_horizon_days, momentum_lookback_days)
+    horizons: List[Tuple[str, int, int]] = field(
+        default_factory=lambda: [
+            ("tomorrow", 1, 1),
+            ("next_week", 5, 5),
+            ("next_month", 20, 20),
+        ]
+    )
+
+    # Feature windows
+    ar_windows: List[int] = field(default_factory=lambda: [10, 20, 60])
+    sign_persist_windows: List[int] = field(default_factory=lambda: [20, 60])
+    vol_windows: List[int] = field(default_factory=lambda: [10, 20])
+    z_score_windows: List[int] = field(default_factory=lambda: [20])
+
+    # Returns hygiene
+    winsor_abs_limit: float = 0.10  # clamp simple daily returns to ±10%
+
+    # Randomness
+    random_state: int = 42
+
+    # Outputs
+    save_predictions: bool = True
+    create_plots: bool = True
+    save_models: bool = True
+    verbose: bool = True
+    show_progress: bool = True
+
+
+def _progress_disabled(cfg: MeanReversionConfig) -> bool:
+    """Progress bars show only if both verbose and show_progress are True."""
+    return not (getattr(cfg, "verbose", True) and getattr(cfg, "show_progress", True))
+
+
+# =========================
+# Data loading (handles percent strings)
+# =========================
+
+def _parse_percentish(series: pd.Series) -> pd.Series:
+    """
+    Coerce a column that may contain:
+      • '0.56%' strings
+      • numeric percents like 0.56 (meaning 0.56%) or 56 (meaning 56%)
+      • decimal simple returns like 0.0056
+    into *decimal simple returns* (e.g., 0.0056).
+    """
+    text = series.astype(str).str.strip()
+
+    # If there is a '%' anywhere, strip and divide by 100.
+    if text.str.contains(r"%").any():
+        text = text.str.replace("%", "", regex=False)
+        out = pd.to_numeric(text, errors="coerce") / 100.0
+        return out
+
+    # Otherwise, try numeric; if many values look like percents (>1), divide by 100.
+    values = pd.to_numeric(text, errors="coerce")
+    q95 = values.abs().quantile(0.95)
+    q99 = values.abs().quantile(0.99)
+
+    if q95 > 1.0 and q99 <= 100.0:
+        values = values / 100.0
+
+    return values
+
+
+def load_returns_wide(excel_path: str | Path, sheet_name: str) -> pd.DataFrame:
+    """
+    Load a "Returns" sheet with the first column as Date and remaining as tickers.
+    Cells can be percent-formatted strings (e.g., '0.56%').
+    Returns a DataFrame with columns: Date, <ticker1>, <ticker2>, ...
+    """
+    df = pd.read_excel(excel_path, sheet_name=sheet_name, engine="openpyxl")
+
+    # Normalize the date column name and values.
+    first_col = df.columns[0]
+    df = df.rename(columns={first_col: "Date"})
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df[df["Date"].notna()].sort_values("Date").reset_index(drop=True)
+
+    # Convert every ticker column to decimal simple returns.
+    ticker_columns = [c for c in df.columns if c != "Date"]
+    for col in ticker_columns:
+        df[col] = _parse_percentish(df[col])
+
+    return df
+
+
+# =========================
+# Returns hygiene, features, labels
+# =========================
+
+def winsorize_simple_returns(series: pd.Series, limit_abs: float) -> pd.Series:
+    """Clamp simple daily returns to ±limit_abs (e.g., ±10%)."""
+    return series.clip(lower=-limit_abs, upper=limit_abs)
+
+
+def compound_forward_simple(simple_returns: pd.Series, horizon: int) -> pd.Series:
+    """Forward compounded simple return over the next `horizon` days."""
+    cp = (1.0 + simple_returns).cumprod()
+    out = cp.shift(-horizon) / cp - 1.0
+    if horizon > 0:
+        out.iloc[-horizon:] = np.nan
+    return out
+
+
+def compound_past_simple(simple_returns: pd.Series, window: int) -> pd.Series:
+    """Past compounded simple return over the prior `window` days (ending t-1)."""
+    past = (1.0 + simple_returns).rolling(window).apply(np.prod, raw=True) - 1.0
+    return past.shift(1)
+
+
+def rolling_autocorr(series: pd.Series, window: int, lag: int = 1) -> pd.Series:
+    """Rolling correlation corr(r_t, r_{t-1}) over `window`, reported at t-1."""
+    x_prev = series.shift(lag)
+    corr = series.rolling(window).corr(x_prev)
+    return corr.shift(1)
+
+
+def rolling_sign_persistence(series: pd.Series, window: int) -> pd.Series:
+    """Share of same-sign days over the last `window` (through t-1)."""
+    same_sign = (np.sign(series) * np.sign(series.shift(1))) > 0
+    rate = same_sign.rolling(window).mean()
+    return rate.shift(1)
+
+
+def build_feature_panel(returns_wide: pd.DataFrame, cfg: MeanReversionConfig) -> pd.DataFrame:
+    """Generate per-ticker features, forward returns, recent momentum, and labels."""
+    tickers = [c for c in returns_wide.columns if c != "Date"]
+    frames: List[pd.DataFrame] = []
+
+    for ticker in tqdm(tickers, desc="Building features (tickers)", disable=_progress_disabled(cfg)):
+        returns_series = returns_wide[ticker].astype(float)
+
+        # Drop very sparse tickers.
+        if returns_series.notna().mean() < 0.7:
+            continue
+
+        # Winsorize for robustness.
+        returns_series = winsorize_simple_returns(returns_series, cfg.winsor_abs_limit)
+
+        base = pd.DataFrame({"Date": returns_wide["Date"], "ticker": ticker})
+        features: Dict[str, pd.Series] = {}
+
+        # Serial correlation features.
+        for w in cfg.ar_windows:
+            features[f"ar1_corr_{w}d"] = rolling_autocorr(returns_series, window=w)
+
+        # Sign persistence.
+        for w in cfg.sign_persist_windows:
+            features[f"sign_persist_{w}d"] = rolling_sign_persistence(returns_series, window=w)
+
+        # Momentum controls.
+        features["ret_1d"] = returns_series.shift(1)
+        features["ret_5d"] = compound_past_simple(returns_series, 5)
+        features["ret_20d"] = compound_past_simple(returns_series, 20)
+
+        # Volatility.
+        for w in cfg.vol_windows:
+            features[f"vol_{w}d"] = returns_series.rolling(w).std().shift(1)
+
+        # Z-score vs MA of price index (scale-free).
+        price_index = (1.0 + returns_series.fillna(0)).cumprod()
+        for w in cfg.z_score_windows:
+            ma = price_index.rolling(w, min_periods=w).mean()
+            sd = price_index.rolling(w, min_periods=w).std()
+            features[f"z_ma_{w}d"] = ((price_index - ma) / sd).shift(1)
+
+        features_df = pd.DataFrame(features)
+
+        # Forward returns for horizons.
+        fwd = {f"fwd_{h}d": compound_forward_simple(returns_series, h) for _, h, _ in cfg.horizons}
+        fwd_df = pd.DataFrame(fwd)
+
+        # Recent momentum baselines for labels.
+        mom = {f"mom_{k}d": compound_past_simple(returns_series, k) for _, _, k in cfg.horizons}
+        mom_df = pd.DataFrame(mom)
+
+        frames.append(pd.concat([base, features_df, fwd_df, mom_df], axis=1))
+
+    if not frames:
+        raise RuntimeError("No usable tickers (too sparse after cleaning).")
+
+    panel = pd.concat(frames, ignore_index=True)
+
+    # Build labels per horizon: mean reversion = future move opposes recent momentum (with abs-move gate).
+    for horizon_name, h_forward, k_mom in cfg.horizons:
+        fwd_col = f"fwd_{h_forward}d"
+        mom_col = f"mom_{k_mom}d"
+
+        mask_big = panel[fwd_col].abs() > cfg.abs_move_threshold
+        sign_future = np.sign(panel[fwd_col])
+        sign_recent = np.sign(panel[mom_col])
+
+        # Mean-reversion label: 1 if big move and opposite to recent momentum; 0 if big move but same direction; NaN otherwise.
+        label_mr = np.where(
+            (mask_big) & (sign_recent != 0) & (sign_future == -sign_recent),
+            1,
+            np.where((mask_big) & (sign_recent != 0), 0, np.nan),
+        )
+        panel[f"label_mr_{horizon_name}"] = label_mr
+
+        # Optional up/down direction (not used by default here).
+        updown = np.where(
+            panel[fwd_col] > cfg.abs_move_threshold, 1,
+            np.where(panel[fwd_col] < -cfg.abs_move_threshold, 0, np.nan),
+        )
+        panel[f"label_updown_{horizon_name}"] = updown
+
+    # Keep rows with all features present; labels can still be NaN (filtered later).
+    feature_cols = [
+        c for c in panel.columns
+        if c not in ("Date", "ticker")
+        and not c.startswith("fwd_")
+        and not c.startswith("mom_")
+        and not c.startswith("label_")
+    ]
+    panel = panel.dropna(subset=feature_cols).reset_index(drop=True)
+    return panel
+
+
+# =========================
+# Walk-forward windows (with horizon purge + embargo)
+# =========================
+
+def generate_walk_forward_windows(
+    dates: pd.Series,
+    train_years: int,
+    val_years: int,
+    td_per_year: int,
+) -> List[Tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]]:
+    """
+    Split unique dates into rolling (train, validation) windows by counts:
+    - train: train_years * td_per_year days
+    - validation: val_years * td_per_year days
+    Step size: move forward by validation length each iteration.
+    """
+    unique_dates = pd.to_datetime(pd.Series(dates.unique())).sort_values().to_numpy()
+    n_train = int(train_years * td_per_year)
+    n_val = int(val_years * td_per_year)
+
+    starts = np.arange(0, len(unique_dates) - (n_train + n_val) + 1, n_val, dtype=int)
+    windows: List[Tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]] = []
+
+    for s in starts:
+        train_dates = unique_dates[s : s + n_train]
+        val_dates = unique_dates[s + n_train : s + n_train + n_val]
+        if train_dates.size == 0 or val_dates.size == 0:
+            continue
+        windows.append(
+            (pd.Timestamp(train_dates[0]), pd.Timestamp(train_dates[-1]),
+             pd.Timestamp(val_dates[0]), pd.Timestamp(val_dates[-1]))
+        )
+    return windows
+
+
+# =========================
+# Modeling helpers
+# =========================
+
+def build_logit_cv(alpha: float, cfg: MeanReversionConfig) -> Union[Pipeline, GridSearchCV]:
+    """
+    Create a standardized logistic regression with:
+      - alpha == 0.0: ridge via LogisticRegressionCV (lbfgs)
+      - alpha == 1.0: lasso via LogisticRegressionCV (saga)
+      - 0 < alpha < 1: elastic-net via GridSearchCV over C using saga and l1_ratio=alpha
+    All use class_weight="balanced" and scoring="neg_log_loss".
+    """
+    if 0 < alpha < 1:
+        pipe = Pipeline([
+            ("scale", StandardScaler()),
+            ("logit", LogisticRegression(
+                penalty="elasticnet", solver="saga", l1_ratio=alpha,
+                max_iter=10_000, class_weight="balanced", random_state=cfg.random_state
+            ))
+        ])
+        grid = {"logit__C": cfg.reg_strengths_C}
+        cv = TimeSeriesSplit(n_splits=cfg.inner_cv_folds)
+        return GridSearchCV(pipe, grid, scoring="neg_log_loss", cv=cv, n_jobs=-1, refit=True, verbose=0)
+
+    if alpha == 0.0:  # ridge
+        return Pipeline([
+            ("scale", StandardScaler()),
+            ("logit_cv", LogisticRegressionCV(
+                penalty="l2", solver="lbfgs",
+                Cs=cfg.reg_strengths_C, cv=cfg.inner_cv_folds, scoring="neg_log_loss",
+                class_weight="balanced", max_iter=10_000, n_jobs=-1, refit=True,
+                random_state=cfg.random_state
+            ))
+        ])
+
+    if alpha == 1.0:  # lasso
+        return Pipeline([
+            ("scale", StandardScaler()),
+            ("logit_cv", LogisticRegressionCV(
+                penalty="l1", solver="saga",
+                Cs=cfg.reg_strengths_C, cv=cfg.inner_cv_folds, scoring="neg_log_loss",
+                class_weight="balanced", max_iter=10_000, n_jobs=-1, refit=True,
+                random_state=cfg.random_state
+            ))
+        ])
+
+    raise ValueError("alpha must be in [0, 1].")
+
+
+def auc_safe(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    """AUC that falls back to 0.5 when degenerate."""
+    y = np.asarray(y_true)
+    p = np.asarray(y_prob, dtype=float)
+    keep = np.isin(y, [0, 1]) & np.isfinite(p)
+    y = y[keep]
+    p = p[keep]
+    if y.size == 0 or np.unique(y).size < 2 or np.allclose(p.std(ddof=0), 0.0):
+        return 0.5
+    try:
+        return float(roc_auc_score(y, p))
+    except Exception:
+        return 0.5
+
+
+def choose_best_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    thresholds: List[float],
+    use_abstain: bool,
+) -> Tuple[float, Dict[str, float]]:
+    """
+    If abstain is enabled (mean-reversion), we classify 1 when p >= τ and 0 when p <= 1-τ.
+    Otherwise, standard single-sided threshold p >= τ.
+    Score = F1 × coverage for abstain; Score = F1 for non-abstain.
+    """
+    best_thr: Optional[float] = None
+    best: Dict[str, float] = {"score": -np.inf}
+
+    for thr in thresholds:
+        if use_abstain and thr <= 0.5:
+            continue
+
+        if use_abstain:
+            pred = np.full_like(y_true, ABSTAIN)
+            hi = y_prob >= thr
+            lo = y_prob <= (1.0 - thr)
+            pred[hi] = 1
+            pred[lo] = 0
+            covered = (pred != ABSTAIN)
+            if not np.any(covered):
+                continue
+            yt = y_true[covered]
+            yp = pred[covered]
+            f1 = f1_score(yt, yp, zero_division=0)
+            bal = balanced_accuracy_score(yt, yp)
+            prc, rec, _, _ = precision_recall_fscore_support(yt, yp, average="binary", zero_division=0)
+            cov = float(np.mean(covered))
+            score = f1 * cov
+        else:
+            pred = (y_prob >= thr).astype(int)
+            f1 = f1_score(y_true, pred, zero_division=0)
+            bal = balanced_accuracy_score(y_true, pred)
+            prc, rec, _, _ = precision_recall_fscore_support(y_true, pred, average="binary", zero_division=0)
+            cov = 1.0
+            score = f1
+
+        metrics = {"f1": f1, "bal_acc": bal, "precision": prc, "recall": rec, "coverage": cov, "score": score}
+        if metrics["score"] > best["score"]:
+            best_thr, best = thr, metrics
+
+    if best_thr is None:
+        # Reasonable fallback
+        best_thr = 0.7 if use_abstain else 0.5
+        best = {"f1": 0.0, "bal_acc": 0.5, "precision": 0.0, "recall": 0.0, "coverage": 0.0, "score": 0.0}
+    return best_thr, best
+
+
+# =========================
+# One horizon run
+# =========================
+
+@dataclass
+class WindowResult:
+    window_index: int
+    horizon_name: str
+    train_start: pd.Timestamp
+    train_end: pd.Timestamp
+    val_start: pd.Timestamp
+    val_end: pd.Timestamp
+    alpha: float
+    chosen_C: float
+    chosen_threshold: float
+    auc_val: float
+    f1_val: float
+    bal_acc_val: float
+    precision_val: float
+    recall_val: float
+    n_train: int
+    n_val: int
+    coverage: float
+
+def make_logit_pipeline(alpha: float, C: float, cfg: MeanReversionConfig) -> Pipeline:
+    """
+    Standardized logistic regression pipeline with chosen penalty:
+      - alpha == 0.0: ridge (l2, lbfgs)
+      - alpha == 1.0: lasso (l1, saga)
+      - 0 < alpha < 1: elastic-net (saga, l1_ratio=alpha)
+    """
+    if alpha == 0.0:
+        logit = LogisticRegression(
+            penalty="l2", solver="lbfgs", C=C,
+            class_weight="balanced", max_iter=10_000, random_state=cfg.random_state
+        )
+    elif alpha == 1.0:
+        logit = LogisticRegression(
+            penalty="l1", solver="saga", C=C,
+            class_weight="balanced", max_iter=10_000, random_state=cfg.random_state
+        )
+    else:
+        logit = LogisticRegression(
+            penalty="elasticnet", solver="saga", l1_ratio=alpha, C=C,
+            class_weight="balanced", max_iter=10_000, random_state=cfg.random_state
+        )
+    return Pipeline([("scale", StandardScaler()), ("logit", logit)])
+
+
+def nested_cv_select_hyperparams(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    cfg: MeanReversionConfig,
+    label_type: str,
+) -> Tuple[float, float, float, float, Dict[str, float]]:
+    """
+    Inner time-series CV to pick (alpha, C, tau).
+    - Splits X_train/y_train with TimeSeriesSplit.
+    - For each (alpha, C): fit on inner-train, predict on inner-val across folds.
+    - Concatenate inner-fold predictions, pick tau via choose_best_threshold.
+    - Selection objective: maximize AUC; tie-break by (F1 × coverage).
+    Returns: best_alpha, best_C, best_tau, best_auc, best_metrics
+    """
+    tscv = TimeSeriesSplit(n_splits=cfg.inner_cv_folds)
+    use_abstain = (label_type == "mr")
+
+    best_alpha = 0.0
+    best_C = 1.0
+    best_tau = 0.7 if use_abstain else 0.5
+    best_auc = -np.inf
+    best_metrics: Dict[str, float] = {"score": -np.inf}
+
+    # Small progress bar over alpha values
+    for alpha in tqdm(cfg.alpha_grid, desc="  innerCV: alpha", leave=False, disable=_progress_disabled(cfg)):
+        # Iterate C grid (no extra CV here; we evaluate on inner validation slices)
+        for C in cfg.reg_strengths_C:
+            y_prob_all: List[np.ndarray] = []
+            y_true_all: List[np.ndarray] = []
+
+            for inner_train_idx, inner_val_idx in tscv.split(X_train):
+                model = make_logit_pipeline(alpha, C, cfg)
+                model.fit(X_train[inner_train_idx], y_train[inner_train_idx])
+
+                y_prob_fold = model.predict_proba(X_train[inner_val_idx])[:, 1]
+                y_prob_all.append(y_prob_fold)
+                y_true_all.append(y_train[inner_val_idx])
+
+            y_prob_concat = np.concatenate(y_prob_all) if y_prob_all else np.array([])
+            y_true_concat = np.concatenate(y_true_all) if y_true_all else np.array([])
+
+            if y_true_concat.size == 0 or np.unique(y_true_concat).size < 2:
+                continue
+
+            auc_inner = auc_safe(y_true_concat, y_prob_concat)
+            tau_candidate, inner_metrics = choose_best_threshold(
+                y_true_concat, y_prob_concat, cfg.threshold_grid, use_abstain
+            )
+
+            is_better_auc = auc_inner > best_auc
+            is_tie_better_score = math.isclose(auc_inner, best_auc) and inner_metrics["score"] > best_metrics["score"]
+
+            if is_better_auc or is_tie_better_score:
+                best_auc = auc_inner
+                best_alpha = alpha
+                best_C = float(C)
+                best_tau = float(tau_candidate)
+                best_metrics = inner_metrics
+
+    return best_alpha, best_C, best_tau, best_auc, best_metrics
+
+
+def run_for_horizon(
+    panel: pd.DataFrame,
+    horizon_name: str,
+    cfg: MeanReversionConfig,
+    label_type: str = "mr",
+) -> Tuple[pd.DataFrame, List[WindowResult]]:
+    """
+    Nested CV per outer window:
+      • OUTER: walk-forward windows → unbiased outer test
+      • INNER (TimeSeriesSplit on outer-train): tune alpha, C, and tau (abstain threshold)
+      • Refit on full outer-train with chosen (alpha, C); evaluate once on outer test using chosen tau
+    """
+    label_col = f"label_{label_type}_{horizon_name}"
+    feature_cols = [
+        c for c in panel.columns
+        if c not in ("Date", "ticker")
+        and not c.startswith("fwd_")
+        and not c.startswith("mom_")
+        and not c.startswith("label_")
+    ]
+
+    df = panel.dropna(subset=[label_col]).copy()
+    X_all = df[feature_cols].values
+    y_all = df[label_col].astype(int).values
+    dates_all = df["Date"].to_numpy()
+
+    outer_windows = generate_walk_forward_windows(
+        df["Date"], cfg.train_years, cfg.validation_years, cfg.trading_days_per_year
+    )
+    horizon_days = next(h for name, h, _ in cfg.horizons if name == horizon_name)
+
+    results: List[WindowResult] = []
+    all_val_preds: List[pd.DataFrame] = []
+
+    for w_idx, (outer_train_start, outer_train_end, outer_test_start, outer_test_end) in enumerate(
+        tqdm(outer_windows, desc=f"{horizon_name}: walk-forward windows", disable=_progress_disabled(cfg)),
+        start=1
+    ):
+        # Purge + embargo relative to horizon
+        train_cutoff = outer_train_end - BDay(horizon_days)
+        test_start_adj = outer_test_start + BDay(cfg.embargo_days)
+        test_cutoff = outer_test_end - BDay(horizon_days)
+
+        in_outer_train = (dates_all >= outer_train_start) & (dates_all <= train_cutoff)
+        in_outer_test  = (dates_all >= test_start_adj)   & (dates_all <= test_cutoff)
+
+        X_tr, y_tr = X_all[in_outer_train], y_all[in_outer_train]
+        X_te, y_te = X_all[in_outer_test],  y_all[in_outer_test]
+        dates_te = df.loc[in_outer_test, "Date"].values
+        tickers_te = df.loc[in_outer_test, "ticker"].values
+
+        # Need both classes in outer train and test to compute metrics cleanly
+        if len(np.unique(y_tr)) < 2 or len(np.unique(y_te)) < 2:
+            if cfg.verbose:
+                print(f"  W{w_idx:02d}: skipped (need both classes in outer train & test).")
+            continue
+
+        # === INNER CV: tune alpha, C, tau on outer-train only ===
+        best_alpha, best_C, best_tau, _, _ = nested_cv_select_hyperparams(
+            X_tr, y_tr, cfg, label_type
+        )
+
+        # === OUTER EVAL: refit on full outer-train with chosen (alpha, C), evaluate on outer-test once ===
+        final_model = make_logit_pipeline(best_alpha, best_C, cfg)
+        final_model.fit(X_tr, y_tr)
+
+        y_prob = final_model.predict_proba(X_te)[:, 1]
+
+        if label_type == "mr":
+            y_pred = np.full_like(y_te, ABSTAIN)
+            hi = y_prob >= best_tau
+            lo = y_prob <= (1.0 - best_tau)
+            y_pred[hi] = 1
+            y_pred[lo] = 0
+            covered_mask = (y_pred != ABSTAIN)
+
+            # Metrics on the *covered* subset (unbiased outer test)
+            if np.any(covered_mask):
+                yt_cov = y_te[covered_mask]
+                yp_cov = y_pred[covered_mask]
+                pr_cov = y_prob[covered_mask]
+
+                auc_outer = auc_safe(yt_cov, pr_cov)
+                f1_outer = f1_score(yt_cov, yp_cov, zero_division=0)
+                precision_outer, recall_outer, _, _ = precision_recall_fscore_support(
+                    yt_cov, yp_cov, average="binary", zero_division=0
+                )
+                coverage = float(np.mean(covered_mask))
+            else:
+                auc_outer = 0.5
+                f1_outer = 0.0
+                precision_outer = 0.0
+                recall_outer = 0.0
+                coverage = 0.0
+
+            abstained = (y_pred == ABSTAIN)
+
+        else:
+            # Single-sided threshold classification (rare in this script, but supported)
+            y_pred = (y_prob >= best_tau).astype(int)
+            abstained = np.zeros_like(y_pred, dtype=bool)
+            auc_outer = auc_safe(y_te, y_prob)
+            f1_outer = f1_score(y_te, y_pred, zero_division=0)
+            precision_outer, recall_outer, _, _ = precision_recall_fscore_support(
+                y_te, y_pred, average="binary", zero_division=0
+            )
+            coverage = 1.0
+
+        # Collect predictions for this outer test slice
+        all_val_preds.append(pd.DataFrame({
+            "Date": dates_te,
+            "ticker": tickers_te,
+            "y_true": y_te,
+            "y_prob": y_prob,
+            "y_pred": y_pred,
+            "abstained": abstained,
+            "window": w_idx
+        }))
+
+        # Optionally save model
+        if cfg.save_models:
+            out_dir = Path(cfg.output_dir); out_dir.mkdir(parents=True, exist_ok=True)
+            model_path = out_dir / f"{label_type}_{horizon_name}_W{w_idx}_alpha{best_alpha:.2f}_C{best_C:.4g}_tau{best_tau:.2f}.joblib"
+            try:
+                dump(final_model, model_path)
+            except Exception:
+                pass
+
+        results.append(WindowResult(
+            window_index=w_idx,
+            horizon_name=horizon_name,
+            train_start=outer_train_start, train_end=outer_train_end,
+            val_start=outer_test_start,   val_end=outer_test_end,
+            alpha=float(best_alpha), chosen_C=float(best_C),
+            chosen_threshold=float(best_tau), auc_val=float(auc_outer),
+            f1_val=float(f1_outer), bal_acc_val=float(0.0),  # bal_acc is less meaningful with abstain; keep 0.0 or compute on covered if desired
+            precision_val=float(precision_outer), recall_val=float(recall_outer),
+            n_train=int(in_outer_train.sum()), n_val=int(in_outer_test.sum()),
+            coverage=float(coverage),
+        ))
+
+    preds_df = pd.concat(all_val_preds, ignore_index=True) if all_val_preds else pd.DataFrame()
+    return preds_df, results
+
+
+# =========================
+# Plots
+# =========================
+
+def plot_performance(
+    preds_df: pd.DataFrame,
+    results: List[WindowResult],
+    horizon_name: str,
+    label_type: str,
+    cfg: MeanReversionConfig,
+) -> None:
+    if preds_df.empty:
+        return
+
+    out_dir = Path(cfg.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ROC on non-abstained
+    if "abstained" in preds_df.columns:
+        mask = ~preds_df["abstained"]
+        y_true = preds_df.loc[mask, "y_true"]
+        y_prob = preds_df.loc[mask, "y_prob"]
+    else:
+        y_true = preds_df["y_true"]
+        y_prob = preds_df["y_prob"]
+
+    if len(y_true) > 0:
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        auc = auc_safe(y_true.to_numpy(), y_prob.to_numpy())
+        plt.figure(figsize=(9, 6))
+        plt.plot(fpr, tpr, lw=2, label=f"AUC = {auc:.3f}")
+        plt.plot([0, 1], [0, 1], "k--", lw=1)
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.title(f"ROC — {label_type.upper()} {horizon_name}")
+        plt.legend(loc="lower right")
+        plt.tight_layout()
+        plt.savefig(out_dir / f"{label_type}_{horizon_name}_roc.png", dpi=300)
+        plt.close()
+
+    # By-window bars
+    if results:
+        r = pd.DataFrame([w.__dict__ for w in results])
+        x = np.arange(len(r))
+        plt.figure(figsize=(12, 6))
+        width = 0.22
+        plt.bar(x - 1.5 * width, r["auc_val"], width, label="AUC")
+        plt.bar(x - 0.5 * width, r["f1_val"], width, label="F1")
+        plt.bar(x + 0.5 * width, r["precision_val"], width, label="Precision")
+        plt.bar(x + 1.5 * width, r["recall_val"], width, label="Recall")
+        plt.axhline(0.5, color="r", ls="--", alpha=0.25)
+        plt.xticks(x, [f"W{i}" for i in r["window_index"]])
+        plt.ylabel("Score")
+        plt.title(f"Validation by Window — {label_type.upper()} {horizon_name}")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(out_dir / f"{label_type}_{horizon_name}_by_window.png", dpi=300)
+        plt.close()
+
+        # Params & coverage
+        fig, ax = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+        ax[0].plot(x, r["alpha"], "o-", label="Alpha")
+        ax[0].plot(x, r["chosen_C"], "o-", label="C")
+        ax[0].set_ylabel("Value")
+        ax[0].set_title(f"Params — {label_type.upper()} {horizon_name}")
+        ax[0].legend()
+        ax[1].plot(x, r["chosen_threshold"], "o-", label="Threshold")
+        ax[1].plot(x, r["coverage"], "o--", label="Coverage")
+        ax[1].set_ylabel("Value")
+        ax[1].set_xlabel("Window")
+        ax[1].legend()
+        plt.tight_layout()
+        plt.savefig(out_dir / f"{label_type}_{horizon_name}_params_coverage.png", dpi=300)
+        plt.close()
+
+
+# =========================
+# Main
+# =========================
+
+def _find_default_excel() -> Optional[Path]:
+    for name in DEFAULT_EXCEL_CANDIDATES:
+        p = Path(name)
+        if p.exists():
+            return p
+    return None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Mean-Reversion Likelihood Model (improved, readable).")
+    parser.add_argument("--excel", type=str, default="", help='Path to Excel file (default: try "MXUS_Data.xlsx").')
+    parser.add_argument("--sheet", type=str, default="Returns", help='Worksheet name (default: "Returns").')
+    parser.add_argument("--out", type=str, default="results", help='Output directory (default: "results").')
+    args = parser.parse_args()
+
+    cfg = MeanReversionConfig(
+        excel_path=args.excel or (str(_find_default_excel()) if _find_default_excel() else ""),
+        sheet_name=args.sheet,
+        output_dir=args.out,
+    )
+
+    if not cfg.excel_path:
+        raise SystemExit('Excel file not specified and not found (tried "MXUS_Data.xlsx").')
+
+    print("=== Mean-Reversion Likelihood Model — Improved (Readable) ===")
+    print(f"Reading: {cfg.excel_path} [sheet={cfg.sheet_name}]")
+
+    # 1) Load returns (percent → decimal)
+    returns_wide = load_returns_wide(cfg.excel_path, cfg.sheet_name)
+    n_tickers = len(returns_wide.columns) - 1
+    print(f"Loaded: {len(returns_wide):,} dates, {n_tickers} tickers")
+
+    # 2) Build features + labels
+    panel = build_feature_panel(returns_wide, cfg)
+    print(
+        f"Panel: {panel.shape[0]:,} rows × {panel.shape[1]} cols  "
+        f"({panel['Date'].min().date()} → {panel['Date'].max().date()})"
+    )
+
+    out_dir = Path(cfg.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3) Run per horizon (mean-reversion label only)
+    for horizon_name, _, _ in tqdm(cfg.horizons, desc="Horizons", disable=_progress_disabled(cfg)):
+        print(f"\n--- Horizon: {horizon_name} (mean-reversion) ---")
+        preds, results = run_for_horizon(panel, horizon_name, cfg, label_type="mr")
+
+        if preds.empty:
+            print("No validation predictions (possibly class imbalance or not enough dates).")
+            continue
+
+        # Quick aggregate on *covered* (non-abstained) subset at neutral 0.50 threshold for reference only.
+        active = preds[~preds["abstained"]]
+        if not active.empty:
+            auc = auc_safe(active["y_true"].to_numpy(), active["y_prob"].to_numpy())
+            pred_bin = (active["y_prob"] >= 0.5).astype(int)
+            f1 = f1_score(active["y_true"], pred_bin, zero_division=0)
+            prc, rec, _, _ = precision_recall_fscore_support(active["y_true"], pred_bin, average="binary", zero_division=0)
+            coverage = 1 - preds["abstained"].mean()
+            print(f"AUC={auc:.4f} | F1@0.50={f1:.4f} | Precision={prc:.4f} | Recall={rec:.4f} | Coverage={coverage:.2f}")
+
+        # Per-window summary
+        print("Per-window choices:")
+        for r in results:
+            print(
+                f" W{r.window_index:02d}  Train {r.train_start.date()}→{r.train_end.date()}  "
+                f"Val {r.val_start.date()}→{r.val_end.date()} | "
+                f"alpha={r.alpha:.1f}  C={r.chosen_C:.4g}  thr={r.chosen_threshold:.2f} | "
+                f"AUC={r.auc_val:.4f}  F1={r.f1_val:.4f}  cov={r.coverage:.2f}  "
+                f"n_train={r.n_train:,}  n_val={r.n_val:,}"
+            )
+
+        # Save outputs
+        if cfg.save_predictions:
+            preds.to_csv(out_dir / f"mr_{horizon_name}_predictions.csv", index=False)
+            pd.DataFrame([w.__dict__ for w in results]).to_csv(out_dir / f"mr_{horizon_name}_results.csv", index=False)
+            print(f"Saved CSVs → mr_{horizon_name}_predictions.csv, mr_{horizon_name}_results.csv")
+
+        if cfg.create_plots:
+            plot_performance(preds, results, horizon_name, "mr", cfg)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
