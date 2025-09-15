@@ -3,25 +3,19 @@
 # ===========================================================
 # Produces per-stock, per-date mean-reversion probabilities and expected move sizes
 # for horizons d1, d3, d7, d15, d30 with leak-aware validation, probability calibration,
-# and conformal magnitude bands.
+# conformal magnitude bands, PR-AUC–aware model selection, and a parameterised magnitude head.
 #
 # Dependencies:
 #   install.packages(c("data.table","readxl","zoo","glmnet","optparse"))
-#   # Optional tree head:
+#   # Optional for metrics:
+#   install.packages("PRROC")
+#   # Optional for magnitude head:
 #   install.packages("xgboost")
 #
-# Usage:
+# Usage examples:
 #   Rscript mr_prod.R --mode forecast --excel MXUS_Data.xlsx --sheet Returns --out results
 #   Rscript mr_prod.R --mode backtest --excel MXUS_Data.xlsx --sheet Returns --out results
 #
-# Notes:
-# - Market features are loaded from an optional "Market" sheet (no web fetching in this R port).
-# - Classifier: glmnet (logit) with inner time-series CV + purge; class weights via sample weights.
-# - Isotonic: base::isoreg used; predicted via stepwise interpolation helper.
-# - Magnitude head: xgboost regressor (optional; falls back to median if not installed).
-# - Conformal bands: absolute-residual quantiles on a held-out calibration slice.
-# - Thresholding: symmetric coverage rule identical to Python (choose largest τ meeting min coverage).
-
 suppressPackageStartupMessages({
   library(data.table)
   library(readxl)
@@ -71,6 +65,11 @@ make_config <- function(
   min_valid_frac = 0.70,
   calib_frac = 0.20,
   conformal_alpha = 0.10,
+  # Magnitude regressor params
+  hgb_max_depth = 3L,
+  hgb_max_iter = 300L,
+  hgb_lr = 0.05,
+  hgb_l2 = 1.0,
   verbose = TRUE,
   show_progress = TRUE
 ){
@@ -89,6 +88,7 @@ make_config <- function(
     threshold_fixed=threshold_fixed, min_exp_move_abs=min_exp_move_abs,
     threshold_rule=threshold_rule, min_valid_frac=min_valid_frac,
     calib_frac=calib_frac, conformal_alpha=conformal_alpha,
+    hgb_max_depth=hgb_max_depth, hgb_max_iter=hgb_max_iter, hgb_lr=hgb_lr, hgb_l2=hgb_l2,
     verbose=verbose, show_progress=show_progress
   )
 }
@@ -102,7 +102,6 @@ log_info <- function(...){ cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "| INFO 
 # Utils
 # -------------------------
 parse_percentish <- function(x) {
-  # Convert strings like "0.56%" or "0.56" to decimals. If values look like [0,100], divide by 100.
   v <- suppressWarnings(as.numeric(gsub("%","",as.character(x), fixed=TRUE)))
   q90 <- quantile(abs(v), 0.90, na.rm=TRUE)
   q95 <- quantile(abs(v), 0.95, na.rm=TRUE)
@@ -116,17 +115,14 @@ parse_percentish <- function(x) {
 winsorize <- function(x, lim) pmin(pmax(x, -lim), lim)
 
 compound_forward_simple <- function(r, h){
-  # forward compounded simple returns: prod(1+r) over horizon - 1
   if (h == 0L) return(rep(NA_real_, length(r)))
   cp <- cumprod(1 + ifelse(is.na(r), 0, r))
-  # shift(-h): cp_{t+h} / cp_t - 1
   out <- (shift(cp, type="lead", n=h) / cp) - 1
   out[(length(out)-h+1L):length(out)] <- NA_real_
   out
 }
 
 compound_past_simple <- function(r, w){
-  # rolling past compounded simple returns, shifted by 1 to avoid leakage
   if (w <= 0L) return(rep(NA_real_, length(r)))
   roll <- rollapply(1 + r, width=w, FUN=function(x) prod(x)-1, align="right", fill=NA_real_, partial=FALSE)
   shift(roll, n=1L, type="lag")
@@ -134,10 +130,7 @@ compound_past_simple <- function(r, w){
 
 rolling_autocorr <- function(r, window, lag=1L){
   xprev <- shift(r, n=lag, type="lag")
-  # use rollapply to compute rolling correlation
-  f <- function(idx){
-    cor(r[idx], xprev[idx], use="complete.obs")
-  }
+  f <- function(idx){ cor(r[idx], xprev[idx], use="complete.obs") }
   out <- rep(NA_real_, length(r))
   if (length(r) >= window){
     idxs <- embed(seq_along(r), window)[, window:1]
@@ -154,7 +147,6 @@ rolling_sign_persist <- function(r, window){
 }
 
 choose_threshold_by_coverage <- function(p, thresholds, min_coverage){
-  # Largest τ whose symmetric coverage meets/exceeds min_coverage
   for (thr in sort(thresholds[thresholds>0.5], decreasing=TRUE)){
     covered <- (p >= thr) | (p <= (1.0 - thr))
     cov <- mean(covered)
@@ -170,11 +162,9 @@ auc_safe <- function(y, p){
   keep <- (y %in% c(0L,1L)) & is.finite(p)
   y <- y[keep]; p <- p[keep]
   if (length(y) == 0L || length(unique(y)) < 2L) return(0.5)
-  # PRROC::roc.curve alternative; use pROC::auc if available
   if (requireNamespace("pROC", quietly=TRUE)){
     as.numeric(pROC::auc(y, p))
   } else {
-    # simple Mann–Whitney U approximation
     o <- order(p, decreasing=TRUE)
     y2 <- y[o]
     pos <- which(y2==1L); neg <- which(y2==0L)
@@ -185,10 +175,30 @@ auc_safe <- function(y, p){
   }
 }
 
-# isoreg predict helper (monotone calibration)
+pr_auc_safe <- function(y, p){
+  y <- as.integer(y)
+  keep <- (y %in% c(0L,1L)) & is.finite(p)
+  y <- y[keep]; p <- p[keep]
+  if (length(y) == 0L || length(unique(y)) < 2L) return(0.0)
+  if (requireNamespace("PRROC", quietly=TRUE)){
+    pr <- PRROC::pr.curve(scores.class0 = p[y==1L], scores.class1 = p[y==0L], curve=FALSE)
+    return(pr$auc.integral)
+  } else {
+    o <- order(p, decreasing=TRUE)
+    y_ord <- y[o]
+    n_pos <- sum(y_ord == 1L)
+    if (n_pos == 0) return(0.0)
+    tp <- cumsum(y_ord)
+    fp <- seq_along(y_ord) - tp
+    prec <- tp / (tp + fp)
+    rec <- tp / n_pos
+    prec <- c(1, prec); rec <- c(0, rec)
+    idx <- 2:length(prec)
+    return(sum((rec[idx] - rec[idx-1]) * (prec[idx] + prec[idx-1])) / 2)
+  }
+}
+
 predict_isoreg <- function(iso, x){
-  # base::isoreg returns a step function through iso$x, iso$yf
-  # We'll do right-continuous step interpolation
   xi <- iso$x; yi <- iso$yf
   ord <- order(xi)
   xi <- xi[ord]; yi <- yi[ord]
@@ -199,7 +209,6 @@ conformal_q <- function(residuals, alpha){
   res <- residuals[is.finite(residuals)]
   n <- length(res)
   if (n == 0L) return(0.0)
-  # quantile per Vovk et al. (ceil((n+1)*(1-alpha)) order statistic)
   k <- min(max(ceiling((n+1)*(1-alpha)), 1L), n)
   sort(res, partial=k)[k]
 }
@@ -224,7 +233,6 @@ autodiscover_excel_and_sheet <- function(excel_arg, sheet_arg){
   for (pat in pats){
     cand <- Sys.glob(pat)
     if (length(cand)){
-      # most recently modified first
       o <- order(file.info(cand)$mtime, decreasing=TRUE)
       cand <- cand[o]
       for (p in cand){
@@ -269,7 +277,6 @@ load_market_from_excel <- function(path, sheet_name="Market"){
   if ("MKT_RET" %in% names(d)) {
     ret <- suppressWarnings(as.numeric(d$MKT_RET))
   } else {
-    # try to infer from a price-like column
     cand <- cols[tolower(cols) %in% c("mkt_px","px","close","adj close","price","value")]
     if (!length(cand) && length(cols)==1L) cand <- cols[1]
     if (length(cand)) {
@@ -292,7 +299,6 @@ compute_market_features <- function(mkt){
   ma <- rollapply(px_index, w, mean, align="right", fill=NA_real_)
   sdv <- rollapply(px_index, w, sd, align="right", fill=NA_real_)
   d[, MKT_Z_MA_20D := (px_index - ma)/sdv]
-  # shift all by 1 day to avoid leakage
   for (c in c("MKT_RET_1D","MKT_RET_5D","MKT_VOL_20D","MKT_Z_MA_20D")) {
     d[[c]] <- shift(d[[c]], 1L, type="lag")
   }
@@ -309,22 +315,16 @@ build_feature_panel <- function(returns_wide, cfg){
   ii <- 0L
   for (tkr in tickers){
     r <- as.numeric(returns_wide[[tkr]])
-    # drop very sparse series
     if (mean(is.finite(r)) < cfg$min_valid_frac) next
     r <- winsorize(r, cfg$winsor_abs_limit)
     base <- data.table(Date=returns_wide$Date, ticker=tkr)
     feats <- list()
-    # AR(1)
     for (w in cfg$ar_windows) feats[[paste0("ar1_corr_", w, "d")]] <- rolling_autocorr(r, w)
-    # Sign persistence
     for (w in cfg$sign_persist_windows) feats[[paste0("sign_persist_", w, "d")]] <- rolling_sign_persist(r, w)
-    # Momentum & short history
     feats$ret_1d  <- shift(r, 1L, type="lag")
     feats$ret_5d  <- compound_past_simple(r, 5L)
     feats$ret_20d <- compound_past_simple(r, 20L)
-    # Volatility feats
     for (w in cfg$vol_feat_windows) feats[[paste0("vol_",w,"d")]] <- shift(rollapply(r, w, sd, align="right", fill=NA_real_), 1L)
-    # Price-index z-score vs rolling MA
     price_index <- cumprod(1 + ifelse(is.na(r), 0, r))
     for (w in cfg$z_score_windows){
       ma <- rollapply(price_index, w, mean, align="right", fill=NA_real_)
@@ -332,7 +332,6 @@ build_feature_panel <- function(returns_wide, cfg){
       feats[[paste0("z_ma_", w, "d")]] <- shift((price_index - ma)/sdv, 1L)
     }
     feats_dt <- as.data.table(feats)
-    # Forward returns & momentum windows for all horizons
     fwd_list <- list(); mom_list <- list()
     for (hz in cfg$horizons){
       fwd_list[[paste0("fwd_", hz$h, "d")]] <- compound_forward_simple(r, hz$h)
@@ -347,7 +346,6 @@ build_feature_panel <- function(returns_wide, cfg){
   if (!length(frames)) stop("No usable tickers after cleaning.")
   panel <- rbindlist(frames, use.names=TRUE, fill=TRUE)
 
-  # Cross-sectional ranks for interpretability
   rank_cols <- c("ret_1d","ret_5d","ret_20d", paste0("z_ma_", cfg$z_score_windows, "d"))
   for (col in rank_cols[rank_cols %in% names(panel)]) {
     panel[, paste0("cs_rank_", col) := {
@@ -355,17 +353,14 @@ build_feature_panel <- function(returns_wide, cfg){
     }, by=Date]
   }
 
-  # daily vol per ticker
   panel[, daily_vol := ave(panel$ret_1d, panel$ticker, FUN=function(x)
     rollapply(x, cfg$vol_window, sd, align="right", fill=NA_real_))]
 
-  # Vol-scaled label gate & labels
   for (hz in cfg$horizons){
     name <- hz$name; h <- hz$h; k <- hz$k
     fwd_col <- paste0("fwd_", h, "d")
     mom_col <- paste0("mom_", k, "d")
     gate <- cfg$vol_k * panel$daily_vol * sqrt(max(h,1))
-    # within-ticker fill of gate
     gate <- ave(gate, panel$ticker, FUN=function(s){
       med <- median(s, na.rm=TRUE); if (!is.finite(med)) med <- 0
       ifelse(is.na(s), med, s)
@@ -378,7 +373,6 @@ build_feature_panel <- function(returns_wide, cfg){
     panel[[paste0("label_mr_", name)]] <- label
   }
 
-  # drop rows with NA in feature inputs
   drop_cols <- c("Date","ticker","daily_vol",
                  grep("^fwd_|^mom_|^label_", names(panel), value=TRUE))
   feat_cols <- setdiff(names(panel), drop_cols)
@@ -406,10 +400,7 @@ walk_forward_windows <- function(dates, train_years, val_years, tdy){
 }
 
 purged_inner_splits <- function(dates, n_splits, purge_days){
-  # Simple forward rolling splits with purge before val start on train side
   N <- length(dates)
-  # indices for K-fold-like time splits
-  # Use evenly spaced split points:
   cuts <- unique(floor(seq(1, N, length.out = n_splits+1)))
   if (length(cuts) < 2L) return(list())
   out <- list()
@@ -431,32 +422,30 @@ purged_inner_splits <- function(dates, n_splits, purge_days){
 # Model builders (glmnet)
 # -------------------------
 fit_glmnet_logit <- function(X, y, alpha, C){
-  # glmnet uses lambda; Python used C = 1/lambda
-  # We'll map by setting lambda = 1/C grid around that value
   set.seed(42)
   lambda_target <- 1.0 / C
   lam_seq <- sort(unique(c(lambda_target * c(10, 3, 1, 1/3, 1/10), 0.0)), decreasing=TRUE)
-  glmnet::glmnet(x=X, y=y, alpha=alpha, family="binomial", lambda=lam_seq,
-                 standardize=TRUE)
+  glmnet::glmnet(x=X, y=y, alpha=alpha, family="binomial", lambda=lam_seq, standardize=TRUE)
 }
 predict_prob_glmnet <- function(model, X){
   as.numeric(pmin(pmax(predict(model, newx=X, type="response", s=model$lambda[which.max(model$dev.ratio)]), 1e-6), 1-1e-6))
 }
 
 # -------------------------
-# Magnitude regressor (xgboost if available)
+# Magnitude regressor (xgboost; optional)
 # -------------------------
-fit_regressor <- function(X, y){
+fit_regressor <- function(X, y, cfg){
   y <- as.numeric(y)
   keep <- is.finite(y)
-  if (sum(keep) < 30 || sd(y[keep]) == 0) return(list(model=NULL, med=median(y[keep], na.rm=TRUE)))
+  if (sum(keep) < 30 || sd(y[keep], na.rm=TRUE) == 0) return(list(model=NULL, med=median(y[keep], na.rm=TRUE)))
   med <- median(y[keep], na.rm=TRUE)
   if (requireNamespace("xgboost", quietly=TRUE)){
     dtr <- xgboost::xgb.DMatrix(data = X[keep,,drop=FALSE], label = y[keep])
     set.seed(42)
     mdl <- xgboost::xgb.train(
-      params=list(objective="reg:squarederror", eta=0.05, max_depth=3, subsample=0.8, colsample_bytree=0.8),
-      data=dtr, nrounds=300, verbose=0
+      params=list(objective="reg:squarederror", eta=cfg$hgb_lr, max_depth=cfg$hgb_max_depth,
+                  subsample=0.8, colsample_bytree=0.8, lambda=cfg$hgb_l2),
+      data=dtr, nrounds=cfg$hgb_max_iter, verbose=0
     )
     return(list(model=mdl, med=med))
   } else {
@@ -497,7 +486,6 @@ run_one_horizon <- function(panel, horizon_name, cfg){
 
   for (w_idx in seq_along(windows)){
     w <- windows[[w_idx]]
-    # horizon-aware purge + embargo
     train_cutoff <- w$tr_end - h_days
     test_start_adj <- w$va_start + cfg$embargo_days
     test_cutoff <- w$va_end - h_days
@@ -515,21 +503,22 @@ run_one_horizon <- function(panel, horizon_name, cfg){
 
     if (length(unique(y_tr)) < 2 || length(unique(y_te)) < 2) next
 
-    # inner CV param search (AUC + PR-AUC; simplified to AUC)
-    best_auc <- -Inf; best_alpha <- NA_real_; best_C <- NA_real_; best_model <- NULL
+    # inner CV param search (AUC + PR-AUC)
+    best_score <- -Inf; best_alpha <- NA_real_; best_C <- NA_real_
     splits <- purged_inner_splits(dates_tr, cfg$inner_cv_folds, purge_days=h_days)
 
     for (alpha in cfg$alpha_grid){
       for (C in cfg$reg_strengths_C){
-        aucs <- c()
+        aucs <- c(); pr_aucs <- c()
         for (sp in splits){
           mdl <- fit_glmnet_logit(X_tr[sp$tr,,drop=FALSE], y_tr[sp$tr], alpha=alpha, C=C)
           p <- predict_prob_glmnet(mdl, X_tr[sp$va,,drop=FALSE])
           aucs <- c(aucs, auc_safe(y_tr[sp$va], p))
+          pr_aucs <- c(pr_aucs, pr_auc_safe(y_tr[sp$va], p))
         }
-        sc <- mean(aucs)
-        if (is.finite(sc) && sc > best_auc){
-          best_auc <- sc; best_alpha <- alpha; best_C <- C
+        sc <- 0.3 * mean(aucs, na.rm=TRUE) + 0.7 * mean(pr_aucs, na.rm=TRUE)
+        if (is.finite(sc) && sc > best_score){
+          best_score <- sc; best_alpha <- alpha; best_C <- C
         }
       }
     }
@@ -541,7 +530,6 @@ run_one_horizon <- function(panel, horizon_name, cfg){
       mdl <- fit_glmnet_logit(X_tr[sp$tr,,drop=FALSE], y_tr[sp$tr], alpha=best_alpha, C=best_C)
       oos_prob[sp$va] <- predict_prob_glmnet(mdl, X_tr[sp$va,,drop=FALSE])
     }
-    # fit isotonic if possible
     iso <- tryCatch({
       keep <- is.finite(oos_prob) & (y_tr %in% c(0L,1L))
       if (sum(keep) >= 30 && length(unique(y_tr[keep]))==2) isoreg(oos_prob[keep], y_tr[keep]) else NULL
@@ -568,8 +556,8 @@ run_one_horizon <- function(panel, horizon_name, cfg){
     y_abs_model <- abs(fwd_tr[model_mask])
     mr_mask_model <- y_tr_model == 1L; mo_mask_model <- y_tr_model == 0L
 
-    reg_mr <- fit_regressor(X_tr_model[mr_mask_model,,drop=FALSE], y_abs_model[mr_mask_model])
-    reg_mo <- fit_regressor(X_tr_model[mo_mask_model,,drop=FALSE], y_abs_model[mo_mask_model])
+    reg_mr <- fit_regressor(X_tr_model[mr_mask_model,,drop=FALSE], y_abs_model[mr_mask_model], cfg)
+    reg_mo <- fit_regressor(X_tr_model[mo_mask_model,,drop=FALSE], y_abs_model[mo_mask_model], cfg)
 
     pred_mr_abs <- predict_regressor(reg_mr, X_te)
     pred_mo_abs <- predict_regressor(reg_mo, X_te)
@@ -630,7 +618,6 @@ run_one_horizon <- function(panel, horizon_name, cfg){
   if (!length(all_preds)) return(list(preds=data.table(), metrics=data.table()))
   preds_all <- rbindlist(all_preds, use.names=TRUE, fill=TRUE)
 
-  # per-ticker metrics
   rows <- list()
   for (tkr in unique(preds_all$ticker)){
     g <- preds_all[ticker == tkr]
@@ -776,18 +763,19 @@ forecast_one_horizon <- function(train_panel, forecast_panel, horizon_name, cfg)
   mom_fc_sign <- sign(as.numeric(forecast_panel[[mom_col]]))
 
   # inner CV param search
-  best_auc <- -Inf; best_alpha <- NA_real_; best_C <- NA_real_
+  best_score <- -Inf; best_alpha <- NA_real_; best_C <- NA_real_
   splits <- purged_inner_splits(dates_tr, cfg$inner_cv_folds, purge_days=h_days)
   for (alpha in cfg$alpha_grid){
     for (C in cfg$reg_strengths_C){
-      aucs <- c()
+      aucs <- c(); pr_aucs <- c()
       for (sp in splits){
         mdl <- fit_glmnet_logit(X_tr[sp$tr,,drop=FALSE], y_tr[sp$tr], alpha=alpha, C=C)
         p <- predict_prob_glmnet(mdl, X_tr[sp$va,,drop=FALSE])
         aucs <- c(aucs, auc_safe(y_tr[sp$va], p))
+        pr_aucs <- c(pr_aucs, pr_auc_safe(y_tr[sp$va], p))
       }
-      sc <- mean(aucs)
-      if (is.finite(sc) && sc > best_auc) { best_auc <- sc; best_alpha <- alpha; best_C <- C }
+      sc <- 0.3 * mean(aucs, na.rm=TRUE) + 0.7 * mean(pr_aucs, na.rm=TRUE)
+      if (is.finite(sc) && sc > best_score) { best_score <- sc; best_alpha <- alpha; best_C <- C }
     }
   }
   if (!is.finite(best_alpha)) { best_alpha <- 0.0; best_C <- 1.0 }
@@ -803,7 +791,6 @@ forecast_one_horizon <- function(train_panel, forecast_panel, horizon_name, cfg)
     if (sum(keep) >= 30 && length(unique(y_tr[keep]))==2) isoreg(oos_prob[keep], y_tr[keep]) else NULL
   }, error=function(e) NULL)
 
-  # temporal calibration inside train
   uniq <- sort(unique(as.Date(dates_tr)))
   n_cal <- max(as.integer(length(uniq) * cfg$calib_frac), 30L)
   cutoff <- if (length(uniq) > n_cal) uniq[length(uniq)-n_cal+1L] else uniq[length(uniq)]
@@ -818,10 +805,9 @@ forecast_one_horizon <- function(train_panel, forecast_panel, horizon_name, cfg)
   p_cal <- if (!is.null(iso)) predict_isoreg(iso, p_raw) else p_raw
   p_cal <- pmin(pmax(p_cal, 1e-6), 1-1e-6)
 
-  # magnitude head
   y_abs_model <- abs(fwd_tr[model_mask])
-  reg_mr <- fit_regressor(X_tr_model[y_tr_model==1L,,drop=FALSE], y_abs_model[y_tr_model==1L])
-  reg_mo <- fit_regressor(X_tr_model[y_tr_model==0L,,drop=FALSE], y_abs_model[y_tr_model==0L])
+  reg_mr <- fit_regressor(X_tr_model[y_tr_model==1L,,drop=FALSE], y_abs_model[y_tr_model==1L], cfg)
+  reg_mo <- fit_regressor(X_tr_model[y_tr_model==0L,,drop=FALSE], y_abs_model[y_tr_model==0L], cfg)
 
   pred_mr_abs <- predict_regressor(reg_mr, X_fc)
   pred_mo_abs <- predict_regressor(reg_mo, X_fc)
@@ -833,8 +819,8 @@ forecast_one_horizon <- function(train_panel, forecast_panel, horizon_name, cfg)
   q_mr <- conformal_q(res_mr, cfg$conformal_alpha)
   q_mo <- conformal_q(res_mo, cfg$conformal_alpha)
 
-  low_move  <- p_cal * (-mom_fc_sign) * (pred_mr_abs - q_mr) + (1.0 - p_cal) * ( mom_fc_sign) * (pred_mo_abs - q_mo)
-  high_move <- p_cal * (-mom_fc_sign) * (pred_mr_abs + q_mr) + (1.0 - p_cal) * ( mom_fc_sign) * (pred_mo_abs + q_mo)
+  low_move  <- p_cal * (-mom_fc_sign) * (pred_mr_abs - q_mr) + (1.0 - p_cal) * (mom_fc_sign) * (pred_mo_abs - q_mo)
+  high_move <- p_cal * (-mom_fc_sign) * (pred_mr_abs + q_mr) + (1.0 - p_cal) * (mom_fc_sign) * (pred_mo_abs + q_mo)
 
   threshold_used <- NA_real_
   y_pred <- rep(ABSTAIN, length(p_cal))
