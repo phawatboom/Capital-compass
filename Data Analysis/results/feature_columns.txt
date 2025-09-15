@@ -9,9 +9,7 @@ ret_20d
 vol_10d
 vol_20d
 z_ma_20d
-z_ma_60d
 cs_rank_ret_1d
 cs_rank_ret_5d
 cs_rank_ret_20d
 cs_rank_z_ma_20d
-cs_rank_z_ma_60d
