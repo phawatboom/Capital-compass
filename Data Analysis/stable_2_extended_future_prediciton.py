@@ -80,6 +80,7 @@ THIS_DIR = Path(__file__).resolve().parent
 @dataclass
 class Config:
     # I/O
+    mode: str = "backtest"  # "backtest" or "forecast"
     excel_path: str | Path = "MXUS_Data.xlsx"
     sheet_name: str = "Returns"
     output_dir: str | Path = "results"
@@ -1286,7 +1287,7 @@ def run_forecast(cfg: Config, model_name: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Mean-Reversion production: per-stock probabilities & magnitudes (no GUI)")
     # Mode
-    p.add_argument("--mode", default="forecast", choices=["backtest","forecast"], help="Run mode: backtest or forecast (default: backtest)")
+    p.add_argument("--mode", default=None, choices=["backtest","forecast"], help="Run mode: backtest or forecast (default: backtest)")
     # Excel can be omitted; we'll autodiscover a workbook and a plausible sheet
     p.add_argument("--excel", dest="excel", default=None, help="Path to Excel file (default: autodiscover MXUS_Data_*.xlsx/MXUS_Data.xlsx or any .xlsx)")
     p.add_argument("--sheet", dest="sheet", default=None, help="Sheet name for returns (default: 'Returns' or first sheet containing 'return')")
@@ -1318,6 +1319,7 @@ def main():
     # This ensures that only arguments explicitly provided on the command line
     # will overwrite the defaults set in the Config class.
     override_args = {
+        "mode": args.mode,
         "excel_path": args.excel,
         "sheet_name": args.sheet,
         "output_dir": args.out,
@@ -1341,7 +1343,7 @@ def main():
     final_args = {k: v for k, v in override_args.items() if v is not None}
     
     cfg = Config(**final_args)
-    if args.mode == "forecast":
+    if cfg.mode == "forecast":
         run_forecast(cfg, model_name=args.model)
     else:
         run_pipeline(cfg, model_name=args.model)

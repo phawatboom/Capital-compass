@@ -1,0 +1,150 @@
+{
+  "timestamp": "2025-09-15T11:01:46.402202Z",
+  "excel": "MXUS_Data.xlsx",
+  "sheet": "Returns",
+  "model": "logit",
+  "mode": "backtest",
+  "config": {
+    "mode": "backtest",
+    "excel_path": "MXUS_Data.xlsx",
+    "sheet_name": "Returns",
+    "output_dir": "results",
+    "with_market": true,
+    "market_sheet": "Market",
+    "market_source": "yahoo_price",
+    "market_start": "1990-01-01",
+    "vol_window": 20,
+    "vol_k": 0.5,
+    "train_years": 3,
+    "validation_years": 1,
+    "trading_days_per_year": 252,
+    "embargo_days": 5,
+    "alpha_grid": [
+      0.0,
+      1.0
+    ],
+    "reg_strengths_C": [
+      0.1,
+      1.0,
+      10.0
+    ],
+    "inner_cv_folds": 3,
+    "xgb_param_grid": [
+      {
+        "max_depth": 3,
+        "n_estimators": 400,
+        "learning_rate": 0.05
+      }
+    ],
+    "lgb_param_grid": [
+      {
+        "num_leaves": 31,
+        "n_estimators": 400,
+        "learning_rate": 0.05
+      }
+    ],
+    "horizons": [
+      [
+        "d1",
+        1,
+        1
+      ],
+      [
+        "d3",
+        3,
+        3
+      ],
+      [
+        "d7",
+        7,
+        7
+      ],
+      [
+        "d15",
+        15,
+        15
+      ],
+      [
+        "d30",
+        30,
+        30
+      ]
+    ],
+    "ar_windows": [
+      10,
+      20,
+      60
+    ],
+    "sign_persist_windows": [
+      20,
+      60
+    ],
+    "vol_feat_windows": [
+      10,
+      20
+    ],
+    "z_score_windows": [
+      20
+    ],
+    "winsor_abs_limit": 0.1,
+    "random_state": 42,
+    "threshold_grid": [
+      0.55,
+      0.56,
+      0.57,
+      0.58,
+      0.59,
+      0.6,
+      0.61,
+      0.62,
+      0.63,
+      0.64,
+      0.65,
+      0.66,
+      0.67,
+      0.68,
+      0.69,
+      0.7,
+      0.71,
+      0.72,
+      0.73,
+      0.74,
+      0.75,
+      0.76,
+      0.77,
+      0.78,
+      0.79,
+      0.8,
+      0.81,
+      0.82,
+      0.83,
+      0.84,
+      0.85,
+      0.86,
+      0.87,
+      0.88,
+      0.89,
+      0.9
+    ],
+    "min_coverage": 0.4,
+    "threshold_fixed": null,
+    "min_exp_move_abs": 0.01,
+    "threshold_rule": "coverage",
+    "n_jobs": -1,
+    "min_valid_frac": 0.7,
+    "calib_frac": 0.2,
+    "conformal_alpha": 0.1,
+    "hgb_max_depth": 3,
+    "hgb_max_iter": 300,
+    "hgb_lr": 0.05,
+    "hgb_l2": 1.0,
+    "verbose": true,
+    "show_progress": true
+  },
+  "versions": {
+    "python": "3.12.9",
+    "numpy": "1.26.4",
+    "pandas": "2.2.3",
+    "sklearn": "1.6.1"
+  }
+}

@@ -280,7 +280,7 @@ export const mockAnalyses: AnalysisListItem[] = [
     cluster_pctile: 0.09,
     ci95_lower: 0.58,
     ci95_upper: 0.83,
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
   },
   {
     analysis_id: "analysis-msft",
@@ -296,7 +296,7 @@ export const mockAnalyses: AnalysisListItem[] = [
     cluster_pctile: 0.05,
     ci95_lower: 0.52,
     ci95_upper: 0.78,
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
   },
   {
     analysis_id: "analysis-googl",
@@ -312,7 +312,7 @@ export const mockAnalyses: AnalysisListItem[] = [
     cluster_pctile: 0.91,
     ci95_lower: 0.18,
     ci95_upper: 0.32,
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
   },
   {
     analysis_id: "analysis-tsla",
@@ -328,7 +328,7 @@ export const mockAnalyses: AnalysisListItem[] = [
     cluster_pctile: 0.78,
     ci95_lower: 0.08,
     ci95_upper: 0.22,
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
   },
   {
     analysis_id: "analysis-nvda",
@@ -344,7 +344,7 @@ export const mockAnalyses: AnalysisListItem[] = [
     cluster_pctile: 0.12,
     ci95_lower: 0.75,
     ci95_upper: 0.89,
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
   },
   {
     analysis_id: "analysis-amzn",
@@ -360,7 +360,7 @@ export const mockAnalyses: AnalysisListItem[] = [
     cluster_pctile: 0.52,
     ci95_lower: 0.38,
     ci95_upper: 0.52,
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
   },
 ]
 
@@ -369,7 +369,7 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
   "analysis-aapl": {
     ticker: "AAPL",
     name: "Apple Inc.",
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
     lookbacks: [10, 20, 60],
     zscores: { "10": -1.2, "20": -1.45, "60": -0.9 },
     zscores_ci95: {
@@ -406,7 +406,7 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
   "analysis-msft": {
     ticker: "MSFT",
     name: "Microsoft Corporation",
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
     lookbacks: [10, 20, 60],
     zscores: { "10": -1.6, "20": -1.85, "60": -1.25 },
     zscores_ci95: {
@@ -443,7 +443,7 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
   "analysis-googl": {
     ticker: "GOOGL",
     name: "Alphabet Inc.",
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
     lookbacks: [10, 20, 60],
     zscores: { "10": 2.1, "20": 1.9, "60": 1.45 },
     zscores_ci95: {
@@ -480,7 +480,7 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
   "analysis-tsla": {
     ticker: "TSLA",
     name: "Tesla Inc.",
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
     lookbacks: [10, 20, 60],
     zscores: { "10": 2.5, "20": 2.31, "60": 1.88 },
     zscores_ci95: {
@@ -517,7 +517,7 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
   "analysis-nvda": {
     ticker: "NVDA",
     name: "NVIDIA Corporation",
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
     lookbacks: [10, 20, 60],
     zscores: { "10": -2.4, "20": -2.15, "60": -1.68 },
     zscores_ci95: {
@@ -554,7 +554,7 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
   "analysis-amzn": {
     ticker: "AMZN",
     name: "Amazon.com Inc.",
-    analysis_date: "2025-08-19",
+    analysis_date: "2025-08-27",
     lookbacks: [10, 20, 60],
     zscores: { "10": 0.08, "20": 0.12, "60": 0.15 },
     zscores_ci95: {

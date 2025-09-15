@@ -157,9 +157,55 @@ export default function StockReport() {
           </Button>
         </div>
       </div>
-
+      
       {/* Bloomberg-style Grid Layout */}
       <div className="grid grid-cols-12 gap-6">
+
+        {/* Score Summary Card */}
+        <Card className="col-span-12 shadow-sm bg-white border-l-4 border-l-blue-600">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">Investment Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid md:grid-cols-4 gap-6">
+              <div className="text-center">
+                <div className="text-3xl font-bold text-blue-600 mb-2">{analysis.score.toFixed(2)}</div>
+                <div className="text-sm text-gray-600 mb-1">Final Score</div>
+                <Badge className={`${scoreZone.bgColor} ${scoreZone.color} border-0`}>{scoreZone.label}</Badge>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-700 mb-2">
+                  {analysis.zscores[selectedLookback].toFixed(2)}σ
+                </div>
+                <div className="text-sm text-gray-600 mb-1">Z-Score ({selectedLookback}d)</div>
+                <Badge variant="outline">{getZScoreInterpretation(analysis.zscores[selectedLookback])}</Badge>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-700 mb-2">
+                  {(analysis.percentiles.market * 100).toFixed(0)}%
+                </div>
+                <div className="text-sm text-gray-600 mb-1">Market Percentile</div>
+                <Badge variant="outline">
+                  {analysis.percentiles.market <= 0.2
+                    ? "Very Cheap"
+                    : analysis.percentiles.market <= 0.4
+                      ? "Cheap"
+                      : analysis.percentiles.market <= 0.6
+                        ? "Fair"
+                        : analysis.percentiles.market <= 0.8
+                          ? "Expensive"
+                          : "Very Expensive"}
+                </Badge>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-700 mb-2">{(analysis.vol["20"] * 100).toFixed(1)}%</div>
+                <div className="text-sm text-gray-600 mb-1">Volatility (20d)</div>
+                <Badge variant="outline">{getVolatilityInterpretation(analysis.vol["20"])}</Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
         {/* Top Row: Price/Z-Score Timeline (8 cols) + Market Percentile (4 cols) */}
         <Card className="col-span-12 lg:col-span-8 shadow-sm bg-white">
           <CardHeader className="pb-4">
@@ -537,50 +583,7 @@ export default function StockReport() {
           </CardContent>
         </Card>
 
-        {/* Score Summary Card */}
-        <Card className="col-span-12 shadow-sm bg-white border-l-4 border-l-blue-600">
-          <CardHeader>
-            <CardTitle className="text-xl font-semibold">Investment Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid md:grid-cols-4 gap-6">
-              <div className="text-center">
-                <div className="text-3xl font-bold text-blue-600 mb-2">{analysis.score.toFixed(2)}</div>
-                <div className="text-sm text-gray-600 mb-1">Final Score</div>
-                <Badge className={`${scoreZone.bgColor} ${scoreZone.color} border-0`}>{scoreZone.label}</Badge>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-gray-700 mb-2">
-                  {analysis.zscores[selectedLookback].toFixed(2)}σ
-                </div>
-                <div className="text-sm text-gray-600 mb-1">Z-Score ({selectedLookback}d)</div>
-                <Badge variant="outline">{getZScoreInterpretation(analysis.zscores[selectedLookback])}</Badge>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-gray-700 mb-2">
-                  {(analysis.percentiles.market * 100).toFixed(0)}%
-                </div>
-                <div className="text-sm text-gray-600 mb-1">Market Percentile</div>
-                <Badge variant="outline">
-                  {analysis.percentiles.market <= 0.2
-                    ? "Very Cheap"
-                    : analysis.percentiles.market <= 0.4
-                      ? "Cheap"
-                      : analysis.percentiles.market <= 0.6
-                        ? "Fair"
-                        : analysis.percentiles.market <= 0.8
-                          ? "Expensive"
-                          : "Very Expensive"}
-                </Badge>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-gray-700 mb-2">{(analysis.vol["20"] * 100).toFixed(1)}%</div>
-                <div className="text-sm text-gray-600 mb-1">Volatility (20d)</div>
-                <Badge variant="outline">{getVolatilityInterpretation(analysis.vol["20"])}</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        
       </div>
 
       {/* Details tabs */}
