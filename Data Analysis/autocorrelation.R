@@ -1,6 +1,7 @@
 # =========================
 # Libraries
 # =========================
+# Need to do install.packages("...") in console for each library
 library(readxl)
 library(dplyr)
 library(tidyr)
@@ -353,4 +354,5 @@ best_by_constr <- by_setting %>% arrange(desc(score_constr), desc(mean_acc)) %>%
 cat("\nBest (Product acc*cov):\n"); print(best_by_prod)
 cat("\nBest (Harmonic mean of acc & cov):\n"); print(best_by_hm)
 cat("\nBest (Constrained product, cov >= 10%):\n"); print(best_by_constr)
+
 
