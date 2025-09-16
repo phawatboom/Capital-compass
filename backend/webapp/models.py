@@ -2,7 +2,9 @@ from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.core.validators import FileExtensionValidator
 
+import os
 # Create your models here.
 class Stock(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -32,9 +34,22 @@ class StockData(models.Model):
 
 # This model is used to record the uploaded CSV files.
 class CSVUploadRecord(models.Model):
-    filename = models.FileField(upload_to='csv_uploads/')
+    filename = models.FileField(
+        upload_to="csv_uploads/",
+        validators=[FileExtensionValidator(allowed_extensions=["csv", "xlsx"])],  # Allow both CSV and Excel files
+    )
     uploaded_at = models.DateTimeField(auto_now_add=True)
     file_size = models.PositiveIntegerField(default=0)
+
+    def save(self, *args, **kwargs):
+        # If a file is present and saved to disk, update file_size
+        if self.filename and hasattr(self.filename, "path"):
+            try:
+                self.file_size = os.path.getsize(self.filename.path)
+            except (OSError, ValueError):
+                # File might not exist yet during initial save
+                pass
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.filename} ({self.uploaded_at}) - {self.file_size} bytes"
