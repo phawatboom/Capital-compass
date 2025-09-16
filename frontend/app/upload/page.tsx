@@ -32,9 +32,10 @@ export default function UploadPage() {
       const validTypes = ["text/csv", "application/vnd.ms-excel"];
       if (
         !validTypes.includes(selectedFile.type) &&
-        !selectedFile.name.toLowerCase().endsWith(".csv")
+        !selectedFile.name.toLowerCase().endsWith(".csv") &&
+        !selectedFile.name.toLowerCase().endsWith(".xlsx")
       ) {
-        setError("Please upload a CSV file (.csv)");
+        setError("Please upload a CSV or Excel file (.csv, .xlsx)");
         setFile(null);
         return;
       }
@@ -170,7 +171,7 @@ export default function UploadPage() {
                 {/* Make the input clickable over the whole drop zone */}
                 <input
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.xlsx"
                   onChange={handleFileSelect}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   disabled={uploading}

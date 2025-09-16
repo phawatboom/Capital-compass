@@ -46,5 +46,13 @@ api.interceptors.response.use(
   }
 );
 
+export const analyzeFile = async (uploadId: number) => {
+  return await fetch(`/api/csv-uploads/${uploadId}/analyze/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  }).then(res => res.json());
+};
 
 export default api;

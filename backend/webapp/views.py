@@ -1,8 +1,16 @@
 import csv
 import io
 import os
-from datetime import datetime
+import subprocess
+import sys
 import pandas as pd
+from django.conf import settings
+import glob
+
+
+from pathlib import Path
+
+from datetime import datetime
 from django.contrib.auth import authenticate, login, logout
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.http import FileResponse
@@ -196,9 +204,6 @@ class FileUploadView(APIView):
             try:
                 upload_record = serializer.save()
                 file_path = upload_record.filename.path
-                file_size = os.path.getsize(file_path)
-                upload_record.file_size = file_size
-                upload_record.save(update_fields=['file_size'])
                 # Handle XLSX files with multiple sheets
                 if file_path.endswith('.xlsx'):
                     sheets_to_process = {
@@ -516,3 +521,62 @@ def change_password(request):
     update_session_auth_hash(request, user)
 
     return Response({"detail": "Password changed successfully."})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def analyze_upload(request, pk: int):
+    # 1. Find the uploaded file record, ensuring it belongs to the user.
+    try:
+        rec = CSVUploadRecord.objects.get(pk=pk, user=request.user)
+    except CSVUploadRecord.DoesNotExist:
+        return Response({"error": "Upload not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # 2. Define paths robustly.
+    # The model script is in the parent directory of the 'backend' folder.
+    project_root = Path(settings.BASE_DIR).parent
+    script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
+    
+    if not script_path.exists():
+        return Response({"error": "Model script not found on server."}, status=500)
+
+    # Create a unique output directory for this analysis run.
+    out_dir = Path(settings.MEDIA_ROOT) / "analysis_results" / str(pk)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3. Run the model script.
+    cmd = [
+        sys.executable,  # Use the same python interpreter Django is using.
+        str(script_path),
+        "--mode", "forecast",
+        "--excel", rec.filename.path,
+        "--out", str(out_dir),
+    ]
+    try:
+        # Set a reasonable timeout (e.g., 10 minutes).
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
+    except subprocess.CalledProcessError as e:
+        # Model script ran but returned an error code.
+        return Response(
+            {
+                "error": "Model run failed.",
+                "details": "The analysis script encountered an error.",
+                "stdout": e.stdout[-2000:],
+                "stderr": e.stderr[-2000:],
+            },
+            status=500,
+        )
+    except subprocess.TimeoutExpired:
+        return Response({"error": "Analysis timed out."}, status=500)
+    except Exception as e:
+        return Response({"error": f"An unexpected error occurred: {e}"}, status=500)
+
+    # 4. Find the generated output file.
+    # The script creates files like 'forecast_YYYYMMDD.csv'.
+    try:
+        latest_file = sorted(out_dir.glob("forecast_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    except IndexError:
+        return Response({"error": "Model ran, but no output file was generated."}, status=500)
+
+    # 5. Return the file for download.
+    return FileResponse(open(latest_file, "rb"), as_attachment=True, filename=latest_file.name)

@@ -81,6 +81,8 @@ function getCsrfToken(): string | null {
 }
 
 export default function UploadsPage() {
+  const [analyzing, setAnalyzing] = useState(false); // State for the "Analyze" button
+  const [results, setResults] = useState([]); // State for storing analysis results
   // Data
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -205,6 +207,61 @@ export default function UploadsPage() {
     if (kind === "type") setTypeFilter("");
     if (kind === "day") setDayFilter(null);
   };
+
+  const handleAnalyze = async (uploadId: number) => {
+      // Use the 'analyzing' state you already created for this button
+      setAnalyzing(true); 
+      setError(null);
+      // You can optionally clear previous results here if you were displaying them
+      // setResults([]); 
+
+      try {
+        // Use the existing helper function to get the token.
+        // This function also fetches the cookie if it's missing.
+        const token = await ensureCsrf();
+
+        const response = await fetch(`${API_BASE}/csv-uploads/${uploadId}/analyze/`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            "X-CSRFToken": token,
+            "Content-Type": "application/json", // Good practice to include
+        },
+        });
+
+        // This block handles HTTP errors from the backend (like 404 or 500)
+        if (!response.ok) {
+          // Try to parse the error message from the backend's JSON response
+          const errorData = await response.json().catch(() => null);
+          const errorMessage = errorData?.error || errorData?.details || `Analysis failed with status: ${response.status}`;
+          throw new Error(errorMessage);
+        }
+
+        // This block handles a successful response (the file download)
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'forecast.csv';
+        if (disposition && disposition.includes('filename=')) {
+          filename = disposition.split('filename=')[1].replace(/"/g, '');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+      } catch (err: any) {
+        // This 'catch' block handles network errors or the error thrown above
+        setError(err.message || 'An unknown error occurred.');
+      } finally {
+        // Use the 'analyzing' state here as well
+        setAnalyzing(false);
+      }
+    };
 
   const handleSelectAllOnPage = (checked: boolean) => {
     const next = new Set(selected);
@@ -505,6 +562,32 @@ export default function UploadsPage() {
 
         {/* Table */}
         <div className="bg-white border rounded-lg shadow-sm overflow-hidden w-full">
+          {/* Render analysis results here */}
+          {results.length > 0 && (
+            <div className="mt-8 bg-white border rounded-lg shadow-sm p-4">
+              <h3 className="text-lg font-semibold mb-4">Analysis Results</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full table-auto">
+                  <thead>
+                    <tr>
+                      {Object.keys(results[0]).map((col) => (
+                        <th key={col} className="px-3 py-2 text-left border-b">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((row, i) => (
+                      <tr key={i}>
+                        {Object.values(row).map((val, j) => (
+                          <td key={j} className="px-3 py-2 border-b">{String(val)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto w-full">
             <table className="w-full table-auto min-w-[720px] sm:min-w-full">
               <thead className="bg-gray-50">
@@ -623,6 +706,16 @@ export default function UploadsPage() {
                               title="Download"
                             >
                               <Download className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 px-2"
+                              onClick={() => handleAnalyze(u.id)}
+                              disabled={analyzing}
+                              title="Analyze"
+                            >
+                              {analyzing ? 'Analyzing...' : 'Analyze'}
                             </Button>
                             <Button
                               type="button"

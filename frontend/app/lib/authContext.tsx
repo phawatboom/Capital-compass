@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       await api.get("/auth/csrf/");
-      const { data } = await api.get<Me>("/auth/me");
+      const { data } = await api.get<Me>("/auth/me/");
       setMe(data);
     } catch {
       setMe(EMPTY);

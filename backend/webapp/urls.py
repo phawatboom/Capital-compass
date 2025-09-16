@@ -1,6 +1,8 @@
 from django.urls import path
 from django.conf.urls.static import static
 from django.conf import settings
+from .views import analyze_upload
+
 
 from .views import (
     FileUploadView,
@@ -40,6 +42,9 @@ urlpatterns = [
     path('auth/profile/', profile_view, name='profile'),
     path('auth/profile/avatar/', profile_avatar, name='profile-avatar'),
     path('auth/change-password/', change_password, name='change-password'),
+
+    # Model analysis
+    path('csv-uploads/<int:pk>/analyze/', analyze_upload, name='analyze-upload'),
 ]
 
 if settings.DEBUG:

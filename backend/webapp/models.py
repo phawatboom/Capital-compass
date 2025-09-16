@@ -3,6 +3,7 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.core.validators import FileExtensionValidator
+from django.contrib.auth.models import User 
 
 import os
 # Create your models here.
@@ -40,6 +41,7 @@ class CSVUploadRecord(models.Model):
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
     file_size = models.PositiveIntegerField(default=0)
+    user = models.ForeignKey(User, on_delete=models.CASCADE) # <-- Add this line
 
     def save(self, *args, **kwargs):
         # If a file is present and saved to disk, update file_size
