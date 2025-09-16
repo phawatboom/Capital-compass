@@ -41,3 +41,7 @@ backend/backend/db-media/
 Thumbs.db
 
 Data Analysis/results/*.csv
+
+Data Analysis/MXUS_Data.xlsx
+
+Data Analysis/*.xlsx
