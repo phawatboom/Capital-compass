@@ -9,6 +9,10 @@ import glob
 
 
 from pathlib import Path
+import logging # <-- Add logging
+
+# Get an instance of a logger
+logger = logging.getLogger(__name__)
 
 from datetime import datetime
 from django.contrib.auth import authenticate, login, logout
@@ -526,57 +530,71 @@ def change_password(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def analyze_upload(request, pk: int):
-    # 1. Find the uploaded file record, ensuring it belongs to the user.
+    logger.info(f"Starting analysis for upload pk={pk}, user={request.user.username}")
+
+    # 1. Find the uploaded file record
     try:
         rec = CSVUploadRecord.objects.get(pk=pk, user=request.user)
     except CSVUploadRecord.DoesNotExist:
+        logger.warning(f"Analysis failed: Upload pk={pk} not found for user={request.user.username}")
         return Response({"error": "Upload not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    # 2. Define paths robustly.
-    # The model script is in the parent directory of the 'backend' folder.
+    # 2. Define paths robustly
     project_root = Path(settings.BASE_DIR).parent
     script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
     
     if not script_path.exists():
+        logger.error(f"Model script not found at {script_path}")
         return Response({"error": "Model script not found on server."}, status=500)
 
-    # Create a unique output directory for this analysis run.
     out_dir = Path(settings.MEDIA_ROOT) / "analysis_results" / str(pk)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 3. Run the model script.
+    # 3. Run the model script SAFELY
     cmd = [
-        sys.executable,  # Use the same python interpreter Django is using.
+        sys.executable,
         str(script_path),
         "--mode", "forecast",
         "--excel", rec.filename.path,
         "--out", str(out_dir),
     ]
+    logger.info(f"Running command: {' '.join(cmd)}")
+
     try:
-        # Set a reasonable timeout (e.g., 10 minutes).
+        # Using check=True will automatically raise CalledProcessError on failure
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
+    
     except subprocess.CalledProcessError as e:
-        # Model script ran but returned an error code.
+        # This block runs if the script executes but returns a non-zero (error) exit code
+        logger.error(f"Model script failed for pk={pk}. Stderr: {e.stderr}")
         return Response(
             {
-                "error": "Model run failed.",
+                "error": "Model script failed to execute.",
                 "details": "The analysis script encountered an error.",
-                "stdout": e.stdout[-2000:],
-                "stderr": e.stderr[-2000:],
+                "stdout": e.stdout[-2000:], # Last 2000 characters of standard output
+                "stderr": e.stderr[-2000:], # Last 2000 characters of standard error
             },
-            status=500,
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+    except FileNotFoundError:
+        logger.error("Could not run model script. Is the python interpreter or script path correct?")
+        return Response({"error": "Failed to find the model script or python executable."}, status=500)
     except subprocess.TimeoutExpired:
-        return Response({"error": "Analysis timed out."}, status=500)
+        logger.warning(f"Analysis for pk={pk} timed out.")
+        return Response({"error": "Analysis timed out after 10 minutes."}, status=500)
     except Exception as e:
-        return Response({"error": f"An unexpected error occurred: {e}"}, status=500)
+        # Catch any other unexpected errors during the subprocess call
+        logger.exception(f"An unexpected error occurred while running the model for pk={pk}")
+        return Response({"error": "An unexpected error occurred during analysis.", "detail": str(e)}, status=500)
 
-    # 4. Find the generated output file.
-    # The script creates files like 'forecast_YYYYMMDD.csv'.
+    # 4. Find the generated output file
+    logger.info(f"Model run successful for pk={pk}. Searching for output file in {out_dir}")
     try:
         latest_file = sorted(out_dir.glob("forecast_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[0]
     except IndexError:
+        logger.error(f"Model ran, but no output file was found in {out_dir}")
         return Response({"error": "Model ran, but no output file was generated."}, status=500)
 
-    # 5. Return the file for download.
+    # 5. Return the file for download
+    logger.info(f"Returning file {latest_file.name} for download.")
     return FileResponse(open(latest_file, "rb"), as_attachment=True, filename=latest_file.name)
