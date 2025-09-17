@@ -209,7 +209,7 @@ export default function UploadPage() {
                     Processing...
                   </>
                 ) : (
-                  "Start Analysis"
+                  "Upload Data"
                 )}
               </Button>
             </CardContent>

@@ -214,15 +214,42 @@ def _parse_percentish(series: pd.Series) -> pd.Series:
 def load_returns_wide(excel_path: str | Path, sheet_name: str) -> pd.DataFrame:
     if not Path(excel_path).exists():
         raise FileNotFoundError(f"Excel file not found: {excel_path}")
-    df = pd.read_excel(excel_path, sheet_name=sheet_name, engine="openpyxl")
-    if df.shape[1] < 2:
-        raise ValueError("Expected 'Date' + ≥1 ticker columns in the Returns sheet.")
-    first_col = df.columns[0]
-    df = df.rename(columns={first_col: "Date"})
+
+    # Read raw (no header); your file has junk rows above the real header
+    raw = pd.read_excel(excel_path, sheet_name=sheet_name, header=None, engine="openpyxl")
+
+    # Find the row whose first cell is 'Date' (case-insensitive)
+    col0 = raw.iloc[:, 0].astype(str).str.strip().str.lower()
+    header_idx_candidates = col0[col0.eq("date")].index.tolist()
+    if not header_idx_candidates:
+        raise ValueError("Could not find a header row with 'Date' in the first column.")
+    header_idx = header_idx_candidates[0]
+
+    # Promote that row to headers and drop rows above it
+    headers = raw.iloc[header_idx].astype(str).str.strip().tolist()
+    df = raw.iloc[header_idx + 1 :].copy()
+    df.columns = headers
+
+    # Normalize/ensure 'Date' column name, then parse dates
+    if "Date" not in df.columns:
+        # just in case the case/spacing differs
+        date_col = [c for c in df.columns if str(c).strip().lower() == "date"]
+        if date_col:
+            df = df.rename(columns={date_col[0]: "Date"})
+        else:
+            # if somehow missing, force first column to Date
+            df = df.rename(columns={df.columns[0]: "Date"})
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df[df["Date"].notna()].sort_values("Date").reset_index(drop=True)
+
+    # Convert all ticker columns to numeric simple returns (handles "0.56%" too)
     for col in [c for c in df.columns if c != "Date"]:
         df[col] = _parse_percentish(df[col])
+
+    # Drop completely-empty ticker columns (if any)
+    keep = ["Date"] + [c for c in df.columns if c != "Date" and df[c].notna().sum() > 0]
+    df = df[keep]
+
     return df
 
 
@@ -979,15 +1006,55 @@ def run_pipeline(cfg: Config, model_name: str) -> None:
         preds.sort_values(["Date","ticker"]).to_csv(preds_path, index=False)
         metrics.to_csv(metrics_path, index=False)
         logger.info(f"Saved: {preds_path.name} ({len(preds):,} rows), {metrics_path.name} ({len(metrics):,} rows)")
+        
         # Quick horizon summary
-        auc_all = auc_safe(preds["y_true"].to_numpy(), preds["y_prob_cal"].to_numpy())
-        if cfg.min_coverage is not None and "abstained" in preds.columns:
-            coverage = float((~preds["abstained"]).mean())
-        else:
-            coverage = float(np.mean(np.isfinite(preds["y_prob_cal"].to_numpy())))
-        summary_rows.append(dict(horizon=name, rows=int(len(preds)), auc=float(auc_all), coverage=coverage))
+                # Quick horizon summary with both accuracies + counts
+        yt = preds["y_true"].to_numpy()
+        pp = preds["y_prob_cal"].to_numpy()
+        finite = np.isfinite(pp)
 
-        summary_rows.append(dict(horizon=name, rows=int(len(preds)), auc=float(auc_all), coverage=coverage))
+        # AUC over all finite probs
+        auc_all = auc_safe(yt[finite], pp[finite]) if finite.any() else float("nan")
+
+        # Full-sample accuracy (0.5 cutoff on calibrated prob)
+        if finite.any():
+            yp_full = (pp[finite] >= 0.5).astype(int)
+            accuracy_full = float((yt[finite] == yp_full).mean())
+            coverage_full = float(finite.mean())
+        else:
+            accuracy_full = float("nan")
+            coverage_full = 0.0
+
+        # Covered/decision accuracy (only when decisions exist)
+        accuracy_covered = float("nan")
+        coverage = coverage_full
+        covered_rows = 0
+
+        if "abstained" in preds.columns:
+            covered_mask = (~preds["abstained"]).to_numpy() & finite
+            coverage = float(covered_mask.mean())
+            covered_rows = int(covered_mask.sum())
+            if covered_rows > 0:
+                yt_cov = preds.loc[covered_mask, "y_true"].to_numpy()
+                yp_cov = preds.loc[covered_mask, "y_pred"].to_numpy()
+                accuracy_covered = float((yt_cov == yp_cov).mean())
+
+        # Extra counts
+        n_unique_tickers = preds["ticker"].nunique() if "ticker" in preds.columns else 0
+        n_unique_dates = preds["Date"].nunique() if "Date" in preds.columns else 0
+
+        summary_rows.append(dict(
+            horizon=name,
+            rows=int(len(preds)),
+            n_unique_tickers=n_unique_tickers,
+            n_unique_dates=n_unique_dates,
+            auc=auc_all,
+            coverage=coverage,
+            accuracy_full=accuracy_full,
+            accuracy_covered=accuracy_covered,
+            covered_rows=covered_rows,
+        ))
+
 
     if summary_rows:
         summary_path = get_unique_filepath(out_dir / "summary.csv")
@@ -1175,16 +1242,16 @@ def forecast_one_horizon(
         "forecast_date": forecast_panel["Date"].values,
         "ticker": tickers_fc,
         "horizon": horizon_name,
-        "raw_probability": p_raw,
-        "calibrated_probability": p_cal,
-        "prediction_confidence": np.maximum(p_cal, 1.0 - p_cal),
-        "expected_move": exp_move,
-        "prediction_interval_low": low_move,
-        "prediction_interval_high": high_move,
-        "momentum_sign": mom_fc_sign,
-        "decision_threshold": threshold_used,
-        "predicted_label": y_pred,
-        "is_abstained": abstained,
+        "y_prob": p_raw,
+        "y_prob_cal": p_cal,
+        "confidence": np.maximum(p_cal, 1.0 - p_cal),
+        "exp_move": exp_move,
+        "pi_low": low_move,
+        "pi_high": high_move,
+        "mom_sign": mom_fc_sign,
+        "threshold": threshold_used,
+        "y_pred": y_pred,
+        "abstained": abstained,
     }
     # Extract the feature values from the forecast panel and add them to the output
     feature_values = forecast_panel[feat_cols].reset_index(drop=True)
