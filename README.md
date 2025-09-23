@@ -120,6 +120,7 @@ cd frontend
 ```bash
 npm install
 npm install axios
+npm install react-date-range date-fns
 ```
 
 4. Start the development server:
