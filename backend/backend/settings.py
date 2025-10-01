@@ -125,6 +125,20 @@ else:
         "https://capitalcompass.com",
     ]
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "loggers": {
+        "django.server": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "django.request": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "django.middleware.csrf": {"handlers": ["console"], "level": "DEBUG"},
+        "corsheaders": {"handlers": ["console"], "level": "DEBUG"},
+    },
+}
+
 
 ROOT_URLCONF = 'backend.urls'
 
