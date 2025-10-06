@@ -1,2 +1,47 @@
-# Ignoring virtual python environment and data file
-.venv
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Virtual envs
+venv/
+.venv/
+env/
+backend/venv/
+
+#environment variables
+.env
+
+# Django
+*.sqlite3
+db.sqlite3
+/staticfiles/
+/local_settings.py
+
+# Media (user uploads)
+backend/media/
+backend/db-media/
+backend/backend/media/
+backend/backend/db-media/
+
+# Tools & caches
+*.log
+*.pot
+*.pyproj
+.mypy_cache/
+.pytest_cache/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+Data Analysis/results/*.csv
+
+Data Analysis/MXUS_Data.xlsx
+
+Data Analysis/*.xlsx
