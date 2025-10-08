@@ -9,9 +9,15 @@ import os
 # Create your models here.
 class Stock(models.Model):
     name = models.CharField(max_length=100, unique=True)
+    b_coefficient = models.FloatField(null=True, blank=True)
+    p_value = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return self.name
+
+    @property
+    def is_significant(self):
+        return self.p_value is not None and self.p_value < 0.05
 
 class StockData(models.Model):
     stock = models.ForeignKey(Stock, on_delete=models.CASCADE)
