@@ -144,7 +144,39 @@ export default function StockDetailPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">{stock.name}</h1>
+    <h1 className="text-2xl font-bold mb-4">{stock.name}</h1>
+
+    {/* Stock stats overview */}
+    <div className="flex flex-wrap gap-4 mb-6">
+      <div className="flex-1 p-4 border rounded-lg shadow-sm bg-gray-50">
+        <h3 className="font-semibold text-gray-700 mb-1">β Coefficient</h3>
+        <p className="text-xl font-bold text-blue-700">
+          {stock.b_coefficient !== null && stock.b_coefficient !== undefined
+            ? stock.b_coefficient.toFixed(3)
+            : "N/A"}
+        </p>
+      </div>
+
+      <div className="flex-1 p-4 border rounded-lg shadow-sm bg-gray-50">
+        <h3 className="font-semibold text-gray-700 mb-1">p-Value</h3>
+        <p className="text-xl font-bold text-blue-700">
+          {stock.p_value !== null && stock.p_value !== undefined
+            ? stock.p_value.toFixed(4)
+            : "N/A"}
+        </p>
+      </div>
+
+      <div className="flex-1 p-4 border rounded-lg shadow-sm bg-gray-50">
+        <h3 className="font-semibold text-gray-700 mb-1">Trend Type</h3>
+        <p className="text-xl font-bold">
+          {stock.p_value < 0.05
+            ? stock.b_coefficient > 0
+              ? "Trending ↑"
+              : "Mean-Reverting ↓"
+            : "Not Significant"}
+        </p>
+      </div>
+    </div>
 
       {/* Filters */}
       <div className="mb-4 flex flex-col gap-4">
