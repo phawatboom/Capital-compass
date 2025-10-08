@@ -21,8 +21,8 @@ from django.http import FileResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework import status, viewsets
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -31,7 +31,6 @@ from .models import Stock, StockData, CSVUploadRecord, UserProfile
 from datetime import date, datetime
 from django.http import FileResponse
 from django.contrib.auth import update_session_auth_hash
-from rest_framework.decorators import parser_classes
 
 from .serializers import (
     CSVUploadSerializer,
@@ -194,7 +193,7 @@ def process_data(df, file, data_type, upload_record):
 # --------------------------------------------------------------------------------------
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         file_obj = request.data.get('file')
@@ -204,9 +203,8 @@ class FileUploadView(APIView):
 
         serializer = CSVUploadSerializer(data={'filename': file_obj})
         if serializer.is_valid():
-            upload_record = None
             try:
-                upload_record = serializer.save()
+                upload_record = serializer.save(user=request.user)
                 file_path = upload_record.filename.path
                 # Handle XLSX files with multiple sheets
                 if file_path.endswith('.xlsx'):
@@ -229,9 +227,9 @@ class FileUploadView(APIView):
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'returns' in file_obj.name.lower():
+                    elif 'returns' or 'mxus_data' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'bql_query' in file_obj.name.lower():
+                    elif 'bql_query' or 'equity' in file_obj.name.lower():
                         data_type = 'equity'
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
@@ -255,6 +253,27 @@ class FileUploadView(APIView):
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+class StockViewSet(viewsets.ModelViewSet):
+    queryset = Stock.objects.all()
+    serializer_class = StockSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        filter_type = self.request.query_params.get("filter", None)
+        if filter_type == "trending":
+            queryset = queryset.filter(
+                b_coefficient__gt=0,
+                p_value__lt=0.05
+            )
+        elif filter_type == "meanreverting":
+            queryset = queryset.filter(
+                b_coefficient__lt=0,
+                p_value__lt=0.05
+            )
+
+        return queryset
 
 # List all stocks.
 @api_view(['GET'])
@@ -542,7 +561,7 @@ def analyze_upload(request, pk: int):
     # 2. Define paths robustly
     project_root = Path(settings.BASE_DIR).parent
     script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
-    
+
     if not script_path.exists():
         logger.error(f"Model script not found at {script_path}")
         return Response({"error": "Model script not found on server."}, status=500)
@@ -563,7 +582,7 @@ def analyze_upload(request, pk: int):
     try:
         # Using check=True will automatically raise CalledProcessError on failure
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
-    
+
     except subprocess.CalledProcessError as e:
         # This block runs if the script executes but returns a non-zero (error) exit code
         logger.error(f"Model script failed for pk={pk}. Stderr: {e.stderr}")
