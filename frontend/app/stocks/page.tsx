@@ -68,7 +68,7 @@ export default function StocksPage() {
       {error && <p className="text-red-600">{error}</p>}
 
       <select
-        className="border px-3 py-2 rounded shadow-sm"
+        className="border px-3 py-2 rounded shadow-sm mb-6"
           value={filterMode}
           onChange={(e) => {
             setFilterMode(e.target.value as "all" | "trending" | "meanreverting");

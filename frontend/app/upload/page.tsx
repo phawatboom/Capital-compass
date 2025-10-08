@@ -3,7 +3,7 @@
 import type React from "react";
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
+import api from "@/app/lib/api";
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,8 +75,8 @@ export default function UploadPage() {
     formData.append("file", file);
 
     try {
-      const res = await axios.post(
-        `${API_BASE}/api/upload-csv/`,
+      const res = await api.post(
+        `/upload-csv/`,
         formData,
         {
           headers: { "Content-Type": "multipart/form-data" },
