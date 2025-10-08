@@ -17,6 +17,8 @@ class CSVUploadSerializer(serializers.ModelSerializer):
 
 # This serializer is used to serialise the Stock model.
 class StockSerializer(serializers.ModelSerializer):
+    is_significant = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = Stock
         fields = '__all__'
