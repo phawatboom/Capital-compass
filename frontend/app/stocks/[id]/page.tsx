@@ -18,7 +18,10 @@ interface StockRow {
 interface Stock {
   id: number;
   name: string;
+  b_coefficient: number | null;
+  p_value: number | null;
   data: StockRow[];
+
 }
 
 export default function StockDetailPage() {
