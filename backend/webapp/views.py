@@ -287,11 +287,32 @@ class StockViewSet(viewsets.ModelViewSet):
 # List all stocks.
 @api_view(['GET'])
 def stock_list(request):
-    """
-    Returns a list of all stocks (id and name only)
-    """
-    stocks = Stock.objects.all().values("id", "name")
-    return Response(list(stocks), status=status.HTTP_200_OK)
+
+    filter_type = request.query_params.get("filter", None)
+
+    if not filter_type or filter_type == 'all':
+        stocks_data = list(Stock.objects.all().values('id', 'name'))
+        return Response(stocks_data, status=status.HTTP_200_OK)
+
+    queryset = Stock.objects.all()
+
+    if filter_type == "trending":
+        queryset = queryset.filter(
+            b_coefficient__gt=0,
+            p_value__lt=0.05
+        )
+    elif filter_type == "meanreverting":
+        queryset = queryset.filter(
+            b_coefficient__lt=0,
+            p_value__lt=0.05
+        )
+
+    stocks_data = [
+        {"id": stock.id, "name": stock.name}
+        for stock in queryset
+    ]
+
+    return Response(stocks_data, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])

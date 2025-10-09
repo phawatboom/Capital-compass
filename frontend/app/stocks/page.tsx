@@ -16,7 +16,7 @@ export default function StocksPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-   const [filterMode, setFilterMode] = useState<"all" | "trending" | "meanreverting">("all");
+  const [filterMode, setFilterMode] = useState<"all" | "trending" | "meanreverting">("all");
 
   const stocksPerPage = 21;
   const API_BASE = "http://127.0.0.1:8000/api";
@@ -33,12 +33,10 @@ export default function StocksPage() {
       .finally(() => setLoading(false));
   }, [filterMode]);
 
-  // Filter by search
   const filteredStocks = stocks.filter((s) =>
     s.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Pagination logic
   const totalPages = Math.ceil(filteredStocks.length / stocksPerPage);
   const startIndex = (currentPage - 1) * stocksPerPage;
   const currentStocks = filteredStocks.slice(
@@ -55,7 +53,6 @@ export default function StocksPage() {
     <div className="p-6 max-w-5xl mx-auto">
       <h1 className="text-3xl font-bold mb-6 text-center">📈 Stocks</h1>
 
-      {/* Search bar */}
       <input
         type="text"
         placeholder="Search stock..."
@@ -69,18 +66,17 @@ export default function StocksPage() {
 
       <select
         className="border px-3 py-2 rounded shadow-sm mb-6"
-          value={filterMode}
-          onChange={(e) => {
-            setFilterMode(e.target.value as "all" | "trending" | "meanreverting");
-            setCurrentPage(1);
-          }}
-        >
-          <option value="all">All Stocks</option>
-          <option value="trending">{"Trending Stocks (β > 0, significant)"}</option>
-          <option value="mean reverting">{"Mean-Reverting Stocks (β < 0, significant)"}</option>
+        value={filterMode}
+        onChange={(e) => {
+          setFilterMode(e.target.value as "all" | "trending" | "meanreverting");
+          setCurrentPage(1);
+        }}
+      >
+        <option value="all">All Stocks</option>
+        <option value="trending">{"Trending Stocks (β > 0, significant)"}</option>
+        <option value="meanreverting">{"Mean-Reverting Stocks (β < 0, significant)"}</option>
       </select>
 
-      {/* Stock cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {currentStocks.map((stock) => (
           <Link
@@ -94,7 +90,6 @@ export default function StocksPage() {
         ))}
       </div>
 
-      {/* Pagination controls */}
       {totalPages > 1 && (
         <div className="mt-6 flex justify-center items-center gap-2">
           <button
