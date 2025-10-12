@@ -17,9 +17,37 @@ class CSVUploadSerializer(serializers.ModelSerializer):
 
 # This serializer is used to serialise the Stock model.
 class StockSerializer(serializers.ModelSerializer):
+    is_significant = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = Stock
         fields = '__all__'
+
+
+class StockDetailSerializer(StockSerializer):
+    data = serializers.SerializerMethodField()
+
+    class Meta(StockSerializer.Meta):
+        fields = ['id', 'name', 'b_coefficient', 'p_value', 'data']
+
+    def get_data(self, obj: Stock):
+        all_data = StockData.objects.filter(stock=obj).order_by('date')
+
+        data_by_date = {}
+        for item in all_data:
+            date_str = item.date.isoformat()
+            if date_str not in data_by_date:
+                data_by_date[date_str] = {'date': date_str, 'price': None, 'return': None, 'equity': None}
+
+            if item.data_type == 'price':
+                data_by_date[date_str]['price'] = item.value
+            elif item.data_type == 'return':
+                data_by_date[date_str]['return'] = item.value
+            elif item.data_type == 'equity':
+                data_by_date[date_str]['equity'] = item.value
+
+        return list(data_by_date.values())
+
 
 # This serializer is used to serialise the StockData model.
 class StockDataSerializer(serializers.ModelSerializer):

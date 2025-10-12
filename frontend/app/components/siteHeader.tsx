@@ -83,7 +83,7 @@ export default function SiteHeader() {
     const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
     (async () => {
       try {
-        const r = await fetch(`${API_BASE}/api/me/`, { credentials: "include" });
+        const r = await fetch(`${API_BASE}/api/auth/me/`, { credentials: "include" });
         if (!r.ok) return;
         const data = await r.json();
         if (!ignore) setAvatarUrl(data?.avatar_url ?? null);

@@ -21,8 +21,8 @@ from django.http import FileResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework import status, viewsets
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -31,11 +31,12 @@ from .models import Stock, StockData, CSVUploadRecord, UserProfile
 from datetime import date, datetime
 from django.http import FileResponse
 from django.contrib.auth import update_session_auth_hash
-from rest_framework.decorators import parser_classes
+from .model import run_for_all_stocks_parallel
 
 from .serializers import (
     CSVUploadSerializer,
     StockSerializer,
+    StockDetailSerializer,
     StockDataSerializer,
     CSVUploadRecordSerializer,
     UserProfileSerializer,
@@ -194,7 +195,7 @@ def process_data(df, file, data_type, upload_record):
 # --------------------------------------------------------------------------------------
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         file_obj = request.data.get('file')
@@ -204,9 +205,8 @@ class FileUploadView(APIView):
 
         serializer = CSVUploadSerializer(data={'filename': file_obj})
         if serializer.is_valid():
-            upload_record = None
             try:
-                upload_record = serializer.save()
+                upload_record = serializer.save(user=request.user)
                 file_path = upload_record.filename.path
                 # Handle XLSX files with multiple sheets
                 if file_path.endswith('.xlsx'):
@@ -229,9 +229,9 @@ class FileUploadView(APIView):
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'returns' in file_obj.name.lower():
+                    elif 'returns' or 'mxus_data' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'bql_query' in file_obj.name.lower():
+                    elif 'bql_query' or 'equity' in file_obj.name.lower():
                         data_type = 'equity'
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
@@ -256,14 +256,63 @@ class FileUploadView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class StockViewSet(viewsets.ModelViewSet):
+    queryset = Stock.objects.all()
+
+    def get_serializer_class(self):
+        # The 'retrieve' action handles GET /api/stocks/{id}/
+        if self.action == 'retrieve':
+            return StockDetailSerializer
+
+        # All other actions (list, create, update, etc.) use the basic serializer
+        return StockSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        filter_type = self.request.query_params.get("filter", None)
+        if filter_type == "trending":
+            queryset = queryset.filter(
+                b_coefficient__gt=0,
+                p_value__lt=0.05
+            )
+        elif filter_type == "meanreverting":
+            queryset = queryset.filter(
+                b_coefficient__lt=0,
+                p_value__lt=0.05
+            )
+
+        return queryset
+
 # List all stocks.
 @api_view(['GET'])
 def stock_list(request):
-    """
-    Returns a list of all stocks (id and name only)
-    """
-    stocks = Stock.objects.all().values("id", "name")
-    return Response(list(stocks), status=status.HTTP_200_OK)
+
+    filter_type = request.query_params.get("filter", None)
+
+    if not filter_type or filter_type == 'all':
+        stocks_data = list(Stock.objects.all().values('id', 'name'))
+        return Response(stocks_data, status=status.HTTP_200_OK)
+
+    queryset = Stock.objects.all()
+
+    if filter_type == "trending":
+        queryset = queryset.filter(
+            b_coefficient__gt=0,
+            p_value__lt=0.05
+        )
+    elif filter_type == "meanreverting":
+        queryset = queryset.filter(
+            b_coefficient__lt=0,
+            p_value__lt=0.05
+        )
+
+    stocks_data = [
+        {"id": stock.id, "name": stock.name}
+        for stock in queryset
+    ]
+
+    return Response(stocks_data, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -290,6 +339,8 @@ def stock_details(request, pk):
     return Response({
         "id": stock.id,
         "name": stock.name,
+        "b_coefficient": stock.b_coefficient,
+        "p_value": stock.p_value,
         "data": rows
     }, status=status.HTTP_200_OK)
 
@@ -530,71 +581,5 @@ def change_password(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def analyze_upload(request, pk: int):
-    logger.info(f"Starting analysis for upload pk={pk}, user={request.user.username}")
-
-    # 1. Find the uploaded file record
-    try:
-        rec = CSVUploadRecord.objects.get(pk=pk, user=request.user)
-    except CSVUploadRecord.DoesNotExist:
-        logger.warning(f"Analysis failed: Upload pk={pk} not found for user={request.user.username}")
-        return Response({"error": "Upload not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    # 2. Define paths robustly
-    project_root = Path(settings.BASE_DIR).parent
-    script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
-    
-    if not script_path.exists():
-        logger.error(f"Model script not found at {script_path}")
-        return Response({"error": "Model script not found on server."}, status=500)
-
-    out_dir = Path(settings.MEDIA_ROOT) / "analysis_results" / str(pk)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # 3. Run the model script SAFELY
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--mode", "forecast",
-        "--excel", rec.filename.path,
-        "--out", str(out_dir),
-    ]
-    logger.info(f"Running command: {' '.join(cmd)}")
-
-    try:
-        # Using check=True will automatically raise CalledProcessError on failure
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
-    
-    except subprocess.CalledProcessError as e:
-        # This block runs if the script executes but returns a non-zero (error) exit code
-        logger.error(f"Model script failed for pk={pk}. Stderr: {e.stderr}")
-        return Response(
-            {
-                "error": "Model script failed to execute.",
-                "details": "The analysis script encountered an error.",
-                "stdout": e.stdout[-2000:], # Last 2000 characters of standard output
-                "stderr": e.stderr[-2000:], # Last 2000 characters of standard error
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except FileNotFoundError:
-        logger.error("Could not run model script. Is the python interpreter or script path correct?")
-        return Response({"error": "Failed to find the model script or python executable."}, status=500)
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Analysis for pk={pk} timed out.")
-        return Response({"error": "Analysis timed out after 10 minutes."}, status=500)
-    except Exception as e:
-        # Catch any other unexpected errors during the subprocess call
-        logger.exception(f"An unexpected error occurred while running the model for pk={pk}")
-        return Response({"error": "An unexpected error occurred during analysis.", "detail": str(e)}, status=500)
-
-    # 4. Find the generated output file
-    logger.info(f"Model run successful for pk={pk}. Searching for output file in {out_dir}")
-    try:
-        latest_file = sorted(out_dir.glob("forecast_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[0]
-    except IndexError:
-        logger.error(f"Model ran, but no output file was found in {out_dir}")
-        return Response({"error": "Model ran, but no output file was generated."}, status=500)
-
-    # 5. Return the file for download
-    logger.info(f"Returning file {latest_file.name} for download.")
-    return FileResponse(open(latest_file, "rb"), as_attachment=True, filename=latest_file.name)
+    run_for_all_stocks_parallel(max_workers=4)
+    return Response({"success": "b coefficients updated for all stocks."})
