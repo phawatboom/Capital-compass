@@ -228,9 +228,9 @@ class FileUploadView(APIView):
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'returns' or 'mxus_data' in file_obj.name.lower():
+                    elif 'returns' in file_obj.name.lower() or 'mxus_data' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'bql_query' or 'equity' in file_obj.name.lower():
+                    elif 'bql_query' in file_obj.name.lower() or 'equity' in file_obj.name.lower():
                         data_type = 'equity'
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
