@@ -4,11 +4,12 @@ from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 from .models import Stock, StockData
 from datetime import date
-
+from django.contrib.auth.models import User
 
 class CSVUploadTest(TestCase):
     def setUp(self):
-        self.client = Client()
+        self.user = User.objects.create_user(username='testuser', password='pass1234')
+        self.client.login(username='testuser', password='pass1234')
         # Path to the test CSV file
         self.test_csv_path = os.path.join(
             os.path.dirname(__file__), "test_data", "test_excel - Prices.csv"
@@ -66,10 +67,13 @@ class CSVUploadTest(TestCase):
 
 class StockAPITests(TestCase):
     def setUp(self):
-        self.client = Client()
+        # Create and log in test user
+        self.user = User.objects.create_user(username='testuser', password='pass1234')
+        self.client.login(username='testuser', password='pass1234')
+
         self.upload_url = reverse("upload-csv")
         self.list_url = reverse("stock-list")
-        self.detail_url = "stock-details"  # Used with reverse()
+        self.detail_url = "stock-details"
 
         # Upload CSV to populate database
         self.test_csv_path = os.path.join(
