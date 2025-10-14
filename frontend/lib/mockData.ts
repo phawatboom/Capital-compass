@@ -3,7 +3,7 @@
  * Matches the API specification structure
  */
 
-import type { Upload, AnalysisListItem, AnalysisDetail } from "@/types/analysis"
+import type { Upload, AnalysisListItem, AnalysisDetail, UnifiedAnalysisResult, ModelType } from "@/types/analysis"
 
 // Generate realistic price series with Z-score data
 function generatePriceSeriesWithZScore(
@@ -594,4 +594,172 @@ export const mockDetailedAnalyses: Record<string, AnalysisDetail> = {
 export const mockUploadAnalyses: Record<string, string[]> = {
   "upload-1": ["analysis-aapl", "analysis-msft", "analysis-googl", "analysis-tsla", "analysis-nvda"],
   "upload-2": ["analysis-amzn"],
+}
+
+// NEW: Unified mock data supporting both model types
+export const mockUnifiedResults: Record<string, UnifiedAnalysisResult> = {
+  "AAPL-MR": {
+    analysis_id: "aapl-mr-20251014",
+    model_type: "mean-reversion",
+    ticker: "AAPL",
+    name: "Apple Inc.",
+    analysis_date: "2025-10-14",
+    recommendation: "BUY",
+    confidence: 0.75,
+    signal_strength: "Strong",
+    model_data: {
+      model_type: "mean-reversion",
+      horizons: [
+        {
+          days: 1,
+          probability: 0.68,
+          expected_move: -0.024,
+          confidence_interval: [-0.045, -0.003],
+          label: "mean-reverting"
+        },
+        {
+          days: 3,
+          probability: 0.71,
+          expected_move: -0.035,
+          confidence_interval: [-0.067, -0.003],
+          label: "mean-reverting"
+        },
+        {
+          days: 7,
+          probability: 0.73,
+          expected_move: -0.048,
+          confidence_interval: [-0.089, -0.007],
+          label: "mean-reverting"
+        }
+      ],
+      current_analysis: {
+        zscore: -1.85,
+        zscore_interpretation: "Very Cheap",
+        serial_correlation: -0.15,
+        volatility: 0.025,
+        cluster_id: "tech-large-cap",
+        market_percentile: 15
+      },
+      series_data: Array.from({ length: 60 }, (_, i) => ({
+        date: new Date(Date.now() - (59 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        price: 180 + Math.sin(i / 10) * 15 + (Math.random() - 0.5) * 8,
+        zscore: -1.85 + (Math.random() - 0.5) * 0.8,
+        prediction: Math.random() > 0.6 ? 1 : -1,
+        actual_move: (Math.random() - 0.5) * 0.06
+      }))
+    }
+  },
+  "AAPL-BETA": {
+    analysis_id: "aapl-beta-20251014",
+    model_type: "beta-forecasting",
+    ticker: "AAPL",
+    name: "Apple Inc.",
+    analysis_date: "2025-10-14",
+    recommendation: "BUY",
+    confidence: 0.72,
+    signal_strength: "Strong",
+    model_data: {
+      model_type: "beta-forecasting",
+      latest_forecast: {
+        Date: "2025-10-14",
+        ticker: "AAPL",
+        beta_pred: 0.125,
+        beta_pred_ema: 0.118,
+        lo: 0.085,
+        hi: 0.165,
+        r2_ols: 0.045,
+        p_value: 0.023,
+        confidence_level: "Medium (p≤5%)",
+        confidence_tier: "Tier-2",
+        delta_beta_20d: 0.078,
+        conf_20d: 0.72,
+        agree_adjacent: true,
+        term_unstable: false,
+        action: "chase",
+      },
+      horizons_forecasts: {
+        "1d": { beta_pred: 0.089, confidence: 0.65, action: "chase" },
+        "2d": { beta_pred: 0.102, confidence: 0.68, action: "chase" },
+        "5d": { beta_pred: 0.115, confidence: 0.70, action: "chase" },
+        "10d": { beta_pred: 0.121, confidence: 0.71, action: "chase" },
+        "20d": { beta_pred: 0.125, confidence: 0.72, action: "chase" },
+      },
+      historical_performance: Array.from({ length: 30 }, (_, i) => ({
+        date: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        horizon: "20d",
+        beta_pred: 0.125 + (Math.random() - 0.5) * 0.1,
+        beta_realized: 0.118 + (Math.random() - 0.5) * 0.15,
+        accuracy: 0.65 + Math.random() * 0.3,
+      })).reverse(),
+      confidence_analysis: {
+        current_tier: "Tier-2",
+        p_value_trend: Array.from({ length: 20 }, (_, i) => ({
+          date: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          p_value: 0.023 + Math.random() * 0.05,
+          significance: Math.random() > 0.3,
+        })).reverse(),
+        r2_trend: Array.from({ length: 20 }, (_, i) => ({
+          date: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          r2: 0.045 + Math.random() * 0.02,
+          quality: (Math.random() > 0.6 ? "High" : Math.random() > 0.3 ? "Medium" : "Low") as "High" | "Medium" | "Low",
+        })).reverse(),
+      }
+    }
+  }
+}
+
+// Legacy mock data for backwards compatibility
+export const mockBetaForecasts: Record<string, any> = {
+  "AAPL": {
+    Date: "2025-10-14",
+    ticker: "AAPL",
+    beta_pred: 0.125,
+    beta_pred_ema: 0.118,
+    lo: 0.085,
+    hi: 0.165,
+    r2_ols: 0.045,
+    p_value: 0.023,
+    confidence_level: "Medium (p≤5%)",
+    confidence_tier: "Tier-2",
+    delta_beta_20d: 0.078,
+    conf_20d: 0.72,
+    agree_adjacent: true,
+    term_unstable: false,
+    action: "chase",
+  },
+  "MSFT": {
+    Date: "2025-10-14",
+    ticker: "MSFT",
+    beta_pred: -0.089,
+    beta_pred_ema: -0.095,
+    lo: -0.125,
+    hi: -0.053,
+    r2_ols: 0.038,
+    p_value: 0.041,
+    confidence_level: "Medium (p≤5%)",
+    confidence_tier: "Tier-2",
+    delta_beta_20d: -0.134,
+    conf_20d: 0.68,
+    agree_adjacent: true,
+    term_unstable: false,
+    action: "fade",
+  },
+  "GOOGL": {
+    Date: "2025-10-14",
+    ticker: "GOOGL",
+    beta_pred: 0.034,
+    beta_pred_ema: 0.041,
+    lo: 0.002,
+    hi: 0.066,
+    r2_ols: 0.022,
+    p_value: 0.089,
+    confidence_level: "Low (p>5%)",
+    confidence_tier: "Tier-3",
+    delta_beta_20d: 0.012,
+    conf_20d: 0.45,
+    agree_adjacent: false,
+    term_unstable: true,
+    action: "hold",
+    hold_reason: "weak_signal",
+  },
 }

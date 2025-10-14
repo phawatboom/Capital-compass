@@ -13,6 +13,101 @@ export interface Upload {
   completed_at?: string
 }
 
+// Model type enumeration
+export type ModelType = "mean-reversion" | "beta-forecasting"
+
+// NEW: Unified analysis result that supports both model types
+export interface UnifiedAnalysisResult {
+  analysis_id: string
+  model_type: ModelType
+  ticker: string
+  name?: string
+  analysis_date: string
+  
+  // Common fields across both models
+  recommendation: "BUY" | "SELL" | "HOLD"
+  confidence: number  // 0-1 scale
+  signal_strength: "Strong" | "Moderate" | "Weak"
+  
+  // Model-specific data (discriminated union)
+  model_data: MeanReversionResult | BetaForecastResult
+}
+
+// Mean-Reversion Model Results (Legacy)
+export interface MeanReversionResult {
+  model_type: "mean-reversion"
+  horizons: Array<{
+    days: number
+    probability: number  // Mean reversion probability
+    expected_move: number
+    confidence_interval: [number, number]
+    label: "mean-reverting" | "trending" | "neutral"
+  }>
+  current_analysis: {
+    zscore: number
+    zscore_interpretation: string
+    serial_correlation: number
+    volatility: number
+    cluster_id?: string
+    market_percentile?: number
+  }
+  series_data: Array<{
+    date: string
+    price: number
+    zscore?: number
+    prediction?: number
+    actual_move?: number
+  }>
+}
+
+// Beta-Forecasting Model Results (Enhanced)
+export interface BetaForecastResult {
+  model_type: "beta-forecasting"
+  latest_forecast: {
+    Date: string
+    ticker: string
+    beta_pred: number
+    beta_pred_ema?: number
+    lo: number  // Lower confidence bound
+    hi: number  // Upper confidence bound
+    r2_ols: number
+    p_value: number
+    confidence_level: "High (p≤1%)" | "Medium (p≤5%)" | "Low (p>5%)"
+    confidence_tier: string
+    delta_beta_20d: number  // Change vs 1-year median
+    conf_20d: number  // Confidence score [0,1]
+    agree_adjacent: boolean  // Adjacent horizons agree
+    term_unstable: boolean  // Term structure unstable
+    action: "chase" | "fade" | "hold"
+    hold_reason?: string  // Reason for hold if applicable
+  }
+  horizons_forecasts: Record<string, {
+    beta_pred: number
+    confidence: number
+    action: "chase" | "fade" | "hold"
+  }>  // Multi-horizon forecasts
+  historical_performance: Array<{
+    date: string
+    horizon: string
+    beta_pred: number
+    beta_realized: number
+    accuracy: number
+  }>
+  confidence_analysis: {
+    current_tier: string
+    p_value_trend: Array<{
+      date: string
+      p_value: number
+      significance: boolean
+    }>
+    r2_trend: Array<{
+      date: string
+      r2: number
+      quality: "High" | "Medium" | "Low"
+    }>
+  }
+}
+
 export interface AnalysisListItem {
   analysis_id: string
   ticker: string
@@ -215,4 +310,145 @@ export function getScoreZone(score: number): {
     bgColor: "bg-red-100",
     numeric: "1-2/10",
   }
+}
+
+// UNIFIED: Model-agnostic helper functions
+export function getModelTypeLabel(modelType: ModelType): string {
+  switch (modelType) {
+    case "mean-reversion":
+      return "Mean-Reversion Analysis"
+    case "beta-forecasting":
+      return "β-Forecasting Analysis"
+    default:
+      return "Unknown Model"
+  }
+}
+
+export function getModelTypeDescription(modelType: ModelType): string {
+  switch (modelType) {
+    case "mean-reversion":
+      return "Statistical mean-reversion analysis with Z-score and serial correlation"
+    case "beta-forecasting":
+      return "Beta coefficient forecasting with confidence intervals and action signals"
+    default:
+      return ""
+  }
+}
+
+export function getUnifiedRecommendationColor(recommendation: "BUY" | "SELL" | "HOLD"): string {
+  switch (recommendation) {
+    case "BUY":
+      return "bg-green-100 text-green-800"
+    case "SELL":
+      return "bg-red-100 text-red-800"
+    default:
+      return "bg-gray-100 text-gray-800"
+  }
+}
+
+export function getUnifiedConfidenceColor(confidence: number): string {
+  if (confidence >= 0.8) return "text-green-600"
+  if (confidence >= 0.6) return "text-yellow-600"
+  return "text-red-600"
+}
+
+export function getSignalStrengthColor(strength: "Strong" | "Moderate" | "Weak"): string {
+  switch (strength) {
+    case "Strong":
+      return "text-green-600"
+    case "Moderate":
+      return "text-yellow-600"
+    default:
+      return "text-red-600"
+  }
+}
+
+// Mean-Reversion specific helpers
+export function getMeanReversionActionFromZScore(zscore: number): "BUY" | "SELL" | "HOLD" {
+  if (zscore <= -1.5) return "BUY"  // Very cheap, expect reversion up
+  if (zscore >= 1.5) return "SELL"  // Very expensive, expect reversion down
+  return "HOLD"
+}
+
+// Beta-Forecasting specific helpers
+export function getBetaActionColor(action: "chase" | "fade" | "hold"): string {
+  switch (action) {
+    case "chase":
+      return "bg-green-100 text-green-800"
+    case "fade":
+      return "bg-red-100 text-red-800"
+    default:
+      return "bg-gray-100 text-gray-800"
+  }
+}
+
+export function getBetaActionLabel(action: "chase" | "fade" | "hold"): string {
+  switch (action) {
+    case "chase":
+      return "Chase (Long)"
+    case "fade":
+      return "Fade (Short)"
+    default:
+      return "Hold"
+  }
+}
+
+export function getBetaRecommendation(action: "chase" | "fade" | "hold"): "BUY" | "SELL" | "HOLD" {
+  switch (action) {
+    case "chase":
+      return "BUY"
+    case "fade":
+      return "SELL"
+    default:
+      return "HOLD"
+  }
+}
+
+export function formatBetaValue(beta: number): string {
+  const sign = beta >= 0 ? "+" : ""
+  return `${sign}${beta.toFixed(3)}`
+}
+
+export function formatPValue(pValue: number): string {
+  if (pValue < 0.001) return "p < 0.001"
+  if (pValue < 0.01) return `p = ${pValue.toFixed(3)}`
+  return `p = ${pValue.toFixed(2)}`
+}
+
+export function getBetaMagnitudeInterpretation(beta: number): string {
+  const abs_beta = Math.abs(beta)
+  if (abs_beta >= 0.15) return "Very Strong"
+  if (abs_beta >= 0.10) return "Strong"
+  if (abs_beta >= 0.05) return "Moderate"
+  return "Weak"
+}
+
+export function getConfidenceInterpretation(confLevel: string): string {
+  switch (confLevel) {
+    case "High (p≤1%)":
+      return "Very Reliable"
+    case "Medium (p≤5%)":
+      return "Reliable"
+    default:
+      return "Uncertain"
+  }
+}
+
+// Model comparison helpers
+export function compareModelResults(
+  meanRevResult: MeanReversionResult,
+  betaResult: BetaForecastResult
+): {
+  agreement: "Strong" | "Weak" | "Conflicting"
+  primary_recommendation: "BUY" | "SELL" | "HOLD"
+  confidence_score: number
+} {
+  const mrRec = getMeanReversionActionFromZScore(meanRevResult.current_analysis.zscore)
+  const betaRec = getBetaRecommendation(betaResult.latest_forecast.action)
+  
+  const agreement = mrRec === betaRec ? "Strong" : "Conflicting"
+  const primary_recommendation = betaResult.latest_forecast.conf_20d > 0.6 ? betaRec : mrRec
+  const confidence_score = agreement === "Strong" ? 0.8 : 0.4
+  
+  return { agreement, primary_recommendation, confidence_score }
 }

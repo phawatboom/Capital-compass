@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 import pandas as pd
+import numpy as np
+from django.db import transaction
 from django.conf import settings
 import glob
 
@@ -15,27 +17,231 @@ import logging # <-- Add logging
 logger = logging.getLogger(__name__)
 
 from datetime import datetime
+from django.utils import timezone
 from django.contrib.auth import authenticate, login, logout
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.http import FileResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from rest_framework import status, viewsets
-from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Stock, StockData, CSVUploadRecord, UserProfile
+from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult
 from datetime import date, datetime
 from django.http import FileResponse
 from django.contrib.auth import update_session_auth_hash
+from rest_framework.decorators import parser_classes
+
+# ================= New / Refactored Analysis Views (synchronous execution) ================= #
+
+class AnalysisResultListView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        qs = AnalysisResult.objects.filter(user=request.user).order_by('-created_at')[:50]
+        return Response({'results': [
+            {
+                'id': a.id,
+                'analysis_type': a.analysis_type,
+                'status': a.status,
+                'created_at': a.created_at.isoformat(),
+                'completed_at': a.completed_at.isoformat() if a.completed_at else None,
+                'summary_stats': a.summary_stats,
+                'error': a.error_message,
+            } for a in qs
+        ]})
+
+class DownloadAnalysisResultView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request, analysis_id):
+        try:
+            analysis = AnalysisResult.objects.get(id=analysis_id, user=request.user)
+        except AnalysisResult.DoesNotExist:
+            return Response({'error': 'Not found'}, status=404)
+        out_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
+        files = sorted(out_dir.glob('forecast_*.csv'), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not files:
+            return Response({'error': 'No forecast CSV available'}, status=404)
+        f = files[0]
+        return FileResponse(open(f, 'rb'), as_attachment=True, filename=f.name)
+
+class RunAnalysisView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        csv_upload_id = request.data.get('csv_upload_id')
+        if not csv_upload_id:
+            return Response({'success': False, 'error': 'csv_upload_id required'}, status=400)
+        analysis_type = request.data.get('analysis_type', 'beta')  # mr|beta|combined
+        mode = request.data.get('mode', 'forecast')  # forecast|backtest
+        parameters = request.data.get('parameters', {}) or {}
+        try:
+            upload = CSVUploadRecord.objects.get(id=csv_upload_id, user=request.user)
+        except CSVUploadRecord.DoesNotExist:
+            return Response({'success': False, 'error': 'Upload not found'}, status=404)
+
+        analysis = AnalysisResult.objects.create(
+            user=request.user,
+            csv_upload=upload,
+            analysis_type=analysis_type,
+            parameters=parameters,
+            status='running',
+            started_at=timezone.now()
+        )
+
+        project_root = Path(settings.BASE_DIR).parent
+        candidates = [
+            'Data Analysis/main_model_file_merged_bcoef_strategy1_stats_legacy (1).py',
+            'Data Analysis/main_model_file_stable_2_extended_future_prediciton_bhat.py',
+            'Data Analysis/main_model_file_stable_2_extended_future_prediciton.py'
+        ]
+        script_path = None
+        for rel in candidates:
+            p = project_root / rel
+            if p.exists():
+                script_path = p
+                break
+        if not script_path:
+            analysis.status = 'failed'
+            analysis.error_message = 'No analysis script found'
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            return Response({'success': False, 'error': 'Script not found'}, status=500)
+
+        output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        cmd = [sys.executable, str(script_path), '--mode', mode, '--excel', upload.filename.path, '--out', str(output_dir)]
+        if analysis_type == 'beta':
+            cmd += ['--bcoef', 'on', '--strategy', parameters.get('strategy', '1')]
+        elif analysis_type == 'mr':
+            cmd += ['--bcoef', 'off']
+        else:
+            cmd += ['--bcoef', 'on', '--combined', '1']
+        for prm, flag in [('train_years','--train_years'), ('min_coverage','--min_coverage'), ('threshold_fixed','--threshold_fixed')]:
+            if prm in parameters:
+                cmd += [flag, str(parameters[prm])]
+
+        logger.info(f"Executing analysis {analysis.id}: {' '.join(cmd)}")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
+        except subprocess.TimeoutExpired:
+            analysis.status = 'failed'; analysis.error_message = 'timeout'; analysis.completed_at = timezone.now(); analysis.save()
+            return Response({'success': False, 'error': 'Timeout'}, status=500)
+        except Exception as e:
+            analysis.status = 'failed'; analysis.error_message = str(e); analysis.completed_at = timezone.now(); analysis.save()
+            return Response({'success': False, 'error': str(e)}, status=500)
+
+        if proc.returncode != 0:
+            analysis.status = 'failed'; analysis.error_message = proc.stderr[-4000:]; analysis.completed_at = timezone.now(); analysis.save()
+            return Response({'success': False, 'error': 'Script failed', 'stderr_tail': proc.stderr[-1000:]}, status=500)
+
+        try:
+            self._postprocess(analysis, output_dir, mode)
+            analysis.status = 'completed'
+            analysis.completed_at = timezone.now()
+            analysis.save()
+        except Exception as e:
+            analysis.status = 'failed'; analysis.error_message = f'Post-processing: {e}'; analysis.completed_at = timezone.now(); analysis.save()
+            return Response({'success': False, 'error': str(e)}, status=500)
+
+        return Response({'success': True, 'analysis_id': analysis.id})
+
+    def _postprocess(self, analysis, output_dir: Path, mode: str):
+        forecast_files = sorted(output_dir.glob('forecast_*.csv'))
+        backtest_files = sorted(output_dir.glob('predictions_*.csv'))
+        if mode == 'forecast' and forecast_files:
+            latest = max(forecast_files, key=lambda p: p.stat().st_mtime)
+            self._store_forecasts(analysis, latest)
+        elif mode == 'backtest' and backtest_files:
+            self._store_backtests(analysis, backtest_files)
+        else:
+            raise ValueError('No output files generated')
+
+    def _store_forecasts(self, analysis, csv_path: Path):
+        df = pd.read_csv(csv_path)
+        required = ['Forecast Date','Ticker','Forecast Horizon','Raw Probability','Calibrated Probability','Confidence','Expected Move','Prediction Interval (Low)','Prediction Interval (High)','Momentum Sign','Prediction','Abstained']
+        miss = [c for c in required if c not in df.columns]
+        if miss:
+            raise ValueError(f'Missing forecast columns: {miss}')
+        df['Forecast Date'] = pd.to_datetime(df['Forecast Date']).dt.date
+        ForecastResult.objects.filter(analysis_result=analysis).delete()
+        objs = []
+        for row in df.itertuples():
+            dct = row._asdict()
+            objs.append(ForecastResult(
+                analysis_result=analysis,
+                forecast_date=dct['Forecast Date'],
+                ticker=dct['Ticker'],
+                forecast_horizon=dct['Forecast Horizon'],
+                raw_probability=dct['Raw Probability'],
+                calibrated_probability=dct['Calibrated Probability'],
+                confidence=dct['Confidence'],
+                expected_move=dct['Expected Move'],
+                prediction_interval_low=dct['Prediction Interval (Low)'],
+                prediction_interval_high=dct['Prediction Interval (High)'],
+                momentum_sign=dct['Momentum Sign'],
+                decision_threshold=dct.get('Decision Threshold'),
+                prediction=int(dct['Prediction']),
+                abstained=bool(dct['Abstained'])
+            ))
+        if objs:
+            ForecastResult.objects.bulk_create(objs, batch_size=1000)
+        analysis.summary_stats = {
+            'total_forecasts': len(df),
+            'unique_tickers': int(df['Ticker'].nunique()),
+            'horizons': sorted(df['Forecast Horizon'].unique().tolist()),
+            'mean_confidence': float(df['Confidence'].mean())
+        }
+        analysis.save(update_fields=['summary_stats'])
+
+    def _store_backtests(self, analysis, csv_paths):
+        BacktestResult.objects.filter(analysis_result=analysis).delete()
+        all_frames = []
+        objs = []
+        for p in csv_paths:
+            horizon = p.stem.replace('predictions_','')
+            df = pd.read_csv(p)
+            req = ['Date','ticker','y_true','y_prob_cal','y_pred','fwd_ret','mr_score','confidence','abstained']
+            miss = [c for c in req if c not in df.columns]
+            if miss:
+                continue
+            all_frames.append(df)
+            for row in df.itertuples():
+                dct = row._asdict()
+                objs.append(BacktestResult(
+                    analysis_result=analysis,
+                    date=pd.to_datetime(dct['Date']).date(),
+                    ticker=dct['ticker'],
+                    horizon=horizon,
+                    y_true=int(dct['y_true']),
+                    y_prob_cal=float(dct['y_prob_cal']),
+                    y_pred=int(dct['y_pred']),
+                    fwd_ret=float(dct['fwd_ret']),
+                    mr_score=float(dct['mr_score']),
+                    confidence=float(dct['confidence']),
+                    abstained=bool(dct['abstained'])
+                ))
+        if objs:
+            BacktestResult.objects.bulk_create(objs, batch_size=1000)
+        if all_frames:
+            all_df = pd.concat(all_frames, ignore_index=True)
+            accuracy = (all_df['y_true'] == all_df['y_pred']).mean()
+            analysis.summary_stats = {
+                'total_predictions': int(len(all_df)),
+                'unique_tickers': int(all_df['ticker'].nunique()),
+                'horizons': sorted(set(p.stem.replace('predictions_','') for p in csv_paths)),
+                'overall_accuracy': float(accuracy),
+                'mean_confidence': float(all_df['confidence'].mean())
+            }
+            analysis.save(update_fields=['summary_stats'])
 
 from .serializers import (
     CSVUploadSerializer,
     StockSerializer,
-    StockDetailSerializer,
     StockDataSerializer,
     CSVUploadRecordSerializer,
     UserProfileSerializer,
@@ -194,7 +400,7 @@ def process_data(df, file, data_type, upload_record):
 # --------------------------------------------------------------------------------------
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         file_obj = request.data.get('file')
@@ -204,8 +410,9 @@ class FileUploadView(APIView):
 
         serializer = CSVUploadSerializer(data={'filename': file_obj})
         if serializer.is_valid():
+            upload_record = None
             try:
-                upload_record = serializer.save(user=request.user)
+                upload_record = serializer.save()
                 file_path = upload_record.filename.path
                 # Handle XLSX files with multiple sheets
                 if file_path.endswith('.xlsx'):
@@ -228,9 +435,9 @@ class FileUploadView(APIView):
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'returns' in file_obj.name.lower() or 'mxus_data' in file_obj.name.lower():
+                    elif 'returns' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'bql_query' in file_obj.name.lower() or 'equity' in file_obj.name.lower():
+                    elif 'bql_query' in file_obj.name.lower():
                         data_type = 'equity'
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
@@ -255,63 +462,14 @@ class FileUploadView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class StockViewSet(viewsets.ModelViewSet):
-    queryset = Stock.objects.all()
-
-    def get_serializer_class(self):
-        # The 'retrieve' action handles GET /api/stocks/{id}/
-        if self.action == 'retrieve':
-            return StockDetailSerializer
-
-        # All other actions (list, create, update, etc.) use the basic serializer
-        return StockSerializer
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-
-        filter_type = self.request.query_params.get("filter", None)
-        if filter_type == "trending":
-            queryset = queryset.filter(
-                b_coefficient__gt=0,
-                p_value__lt=0.05
-            )
-        elif filter_type == "meanreverting":
-            queryset = queryset.filter(
-                b_coefficient__lt=0,
-                p_value__lt=0.05
-            )
-
-        return queryset
-
 # List all stocks.
 @api_view(['GET'])
 def stock_list(request):
-
-    filter_type = request.query_params.get("filter", None)
-
-    if not filter_type or filter_type == 'all':
-        stocks_data = list(Stock.objects.all().values('id', 'name'))
-        return Response(stocks_data, status=status.HTTP_200_OK)
-
-    queryset = Stock.objects.all()
-
-    if filter_type == "trending":
-        queryset = queryset.filter(
-            b_coefficient__gt=0,
-            p_value__lt=0.05
-        )
-    elif filter_type == "meanreverting":
-        queryset = queryset.filter(
-            b_coefficient__lt=0,
-            p_value__lt=0.05
-        )
-
-    stocks_data = [
-        {"id": stock.id, "name": stock.name}
-        for stock in queryset
-    ]
-
-    return Response(stocks_data, status=status.HTTP_200_OK)
+    """
+    Returns a list of all stocks (id and name only)
+    """
+    stocks = Stock.objects.all().values("id", "name")
+    return Response(list(stocks), status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -338,8 +496,6 @@ def stock_details(request, pk):
     return Response({
         "id": stock.id,
         "name": stock.name,
-        "b_coefficient": stock.b_coefficient,
-        "p_value": stock.p_value,
         "data": rows
     }, status=status.HTTP_200_OK)
 
@@ -592,7 +748,7 @@ def analyze_upload(request, pk: int):
     # 2. Define paths robustly
     project_root = Path(settings.BASE_DIR).parent
     script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
-
+    
     if not script_path.exists():
         logger.error(f"Model script not found at {script_path}")
         return Response({"error": "Model script not found on server."}, status=500)
@@ -613,7 +769,7 @@ def analyze_upload(request, pk: int):
     try:
         # Using check=True will automatically raise CalledProcessError on failure
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
-
+    
     except subprocess.CalledProcessError as e:
         # This block runs if the script executes but returns a non-zero (error) exit code
         logger.error(f"Model script failed for pk={pk}. Stderr: {e.stderr}")
@@ -648,3 +804,370 @@ def analyze_upload(request, pk: int):
     # 5. Return the file for download
     logger.info(f"Returning file {latest_file.name} for download.")
     return FileResponse(open(latest_file, "rb"), as_attachment=True, filename=latest_file.name)
+
+
+class DashboardDataView(APIView):
+    """Get real dashboard data from database"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Get latest completed analysis
+            latest_analysis = AnalysisResult.objects.filter(
+                user=request.user,
+                status='completed'
+            ).order_by('-completed_at').first()
+            
+            if not latest_analysis:
+                return Response({
+                    'message': 'No completed analysis found',
+                    'has_data': False
+                })
+            
+            # Get forecast data
+            forecasts = ForecastResult.objects.filter(
+                analysis_result=latest_analysis
+            ).select_related('analysis_result')
+            
+            # Calculate dashboard metrics
+            dashboard_data = self.calculate_dashboard_metrics(latest_analysis, forecasts)
+            dashboard_data['has_data'] = True
+            dashboard_data['last_updated'] = latest_analysis.completed_at.isoformat()
+            dashboard_data['analysis_id'] = latest_analysis.id
+            
+            return Response(dashboard_data)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+    
+    def calculate_dashboard_metrics(self, analysis_result, forecasts):
+        """Calculate key metrics for dashboard"""
+        
+        if not forecasts.exists():
+            return {'message': 'No forecast data available'}
+        
+        # Convert to DataFrame for easier analysis
+        forecast_data = []
+        for f in forecasts:
+            forecast_data.append({
+                'ticker': f.ticker,
+                'horizon': f.forecast_horizon,
+                'calibrated_probability': f.calibrated_probability,
+                'confidence': f.confidence,
+                'expected_move': f.expected_move,
+                'prediction': f.prediction,
+                'abstained': f.abstained,
+                'signal_strength': f.signal_strength
+            })
+        
+        df = pd.DataFrame(forecast_data)
+        
+        # Key metrics
+        total_stocks = df['ticker'].nunique()
+        total_signals = len(df[df['prediction'] != -1])
+        mean_reverting_signals = len(df[df['prediction'] == 1])
+        momentum_signals = len(df[df['prediction'] == 0])
+        abstained_count = len(df[df['abstained'] == True])
+        
+        # Confidence distribution
+        high_confidence = len(df[df['confidence'] >= 0.8])
+        medium_confidence = len(df[(df['confidence'] >= 0.6) & (df['confidence'] < 0.8)])
+        low_confidence = len(df[df['confidence'] < 0.6])
+        
+        # Top opportunities
+        top_mean_reverting = df[df['prediction'] == 1].nlargest(10, 'signal_strength')
+        top_momentum = df[df['prediction'] == 0].nlargest(10, 'signal_strength')
+        
+        # Risk metrics
+        high_risk_moves = len(df[df['expected_move'].abs() >= 0.05])  # 5%+ expected moves
+        
+        return {
+            'overview': {
+                'total_stocks_analyzed': total_stocks,
+                'total_signals_generated': total_signals,
+                'mean_reverting_signals': mean_reverting_signals,
+                'momentum_signals': momentum_signals,
+                'abstained_count': abstained_count,
+                'signal_rate': round((total_signals / len(df)) * 100, 1) if len(df) > 0 else 0
+            },
+            'confidence_distribution': {
+                'high_confidence': high_confidence,
+                'medium_confidence': medium_confidence,
+                'low_confidence': low_confidence
+            },
+            'risk_metrics': {
+                'high_risk_moves': high_risk_moves,
+                'avg_expected_move': round(df['expected_move'].abs().mean(), 4),
+                'max_expected_move': round(df['expected_move'].abs().max(), 4)
+            },
+            'top_opportunities': {
+                'mean_reverting': [
+                    {
+                        'ticker': row['ticker'],
+                        'horizon': row['horizon'],
+                        'confidence': round(row['confidence'], 3),
+                        'expected_move': round(row['expected_move'], 4),
+                        'signal_strength': round(row['signal_strength'], 4)
+                    }
+                    for _, row in top_mean_reverting.iterrows()
+                ],
+                'momentum': [
+                    {
+                        'ticker': row['ticker'],
+                        'horizon': row['horizon'],
+                        'confidence': round(row['confidence'], 3),
+                        'expected_move': round(row['expected_move'], 4),
+                        'signal_strength': round(row['signal_strength'], 4)
+                    }
+                    for _, row in top_momentum.iterrows()
+                ]
+            },
+            'horizon_breakdown': df.groupby('horizon').agg({
+                'prediction': lambda x: (x != -1).sum(),
+                'confidence': 'mean',
+                'expected_move': lambda x: x.abs().mean()
+            }).round(4).to_dict()
+        }
+
+class StockForecastView(APIView):
+    """Get forecast data for specific stock or all stocks"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, ticker=None):
+        try:
+            # Get latest analysis
+            latest_analysis = AnalysisResult.objects.filter(
+                user=request.user,
+                status='completed'
+            ).order_by('-completed_at').first()
+            
+            if not latest_analysis:
+                return Response({'error': 'No completed analysis found'}, status=404)
+            
+            # Filter forecasts
+            forecasts_query = ForecastResult.objects.filter(
+                analysis_result=latest_analysis
+            )
+            
+            if ticker:
+                forecasts_query = forecasts_query.filter(ticker=ticker.upper())
+            
+            forecasts = forecasts_query.order_by('ticker', 'forecast_horizon')
+            
+            # Serialize forecast data
+            forecast_data = []
+            for f in forecasts:
+                forecast_data.append({
+                    'ticker': f.ticker,
+                    'forecast_date': f.forecast_date.isoformat(),
+                    'horizon': f.forecast_horizon,
+                    'raw_probability': round(f.raw_probability, 4),
+                    'calibrated_probability': round(f.calibrated_probability, 4),
+                    'confidence': round(f.confidence, 4),
+                    'expected_move': round(f.expected_move, 4),
+                    'prediction_interval': {
+                        'low': round(f.prediction_interval_low, 4),
+                        'high': round(f.prediction_interval_high, 4)
+                    },
+                    'prediction': f.prediction,
+                    'abstained': f.abstained,
+                    'signal_strength': round(f.signal_strength, 4),
+                    'is_mean_reverting': f.is_mean_reverting
+                })
+            
+            return Response({
+                'success': True,
+                'data': forecast_data,
+                'analysis_date': latest_analysis.completed_at.isoformat(),
+                'total_records': len(forecast_data)
+            })
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+
+class BacktestPerformanceView(APIView):
+    """Get backtest performance data"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Get latest backtest analysis
+            latest_analysis = AnalysisResult.objects.filter(
+                user=request.user,
+                status='completed'
+            ).order_by('-completed_at').first()
+            
+            if not latest_analysis:
+                return Response({'error': 'No completed analysis found'}, status=404)
+            
+            # Get backtest results
+            backtests = BacktestResult.objects.filter(
+                analysis_result=latest_analysis
+            ).order_by('-date')
+            
+            if not backtests.exists():
+                return Response({'message': 'No backtest data available'})
+            
+            # Calculate performance metrics
+            performance_data = self.calculate_backtest_performance(backtests)
+            performance_data['analysis_date'] = latest_analysis.completed_at.isoformat()
+            
+            return Response(performance_data)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+    
+    def calculate_backtest_performance(self, backtests):
+        """Calculate backtest performance metrics"""
+        
+        # Convert to DataFrame
+        backtest_data = []
+        for b in backtests:
+            backtest_data.append({
+                'date': b.date,
+                'ticker': b.ticker,
+                'horizon': b.horizon,
+                'y_true': b.y_true,
+                'y_pred': b.y_pred,
+                'y_prob_cal': b.y_prob_cal,
+                'fwd_ret': b.fwd_ret,
+                'confidence': b.confidence,
+                'abstained': b.abstained
+            })
+        
+        df = pd.DataFrame(backtest_data)
+        
+        # Overall performance
+        total_predictions = len(df[~df['abstained']])
+        correct_predictions = len(df[(~df['abstained']) & (df['y_true'] == df['y_pred'])])
+        accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
+        
+        # Performance by horizon
+        horizon_performance = {}
+        for horizon in df['horizon'].unique():
+            h_df = df[df['horizon'] == horizon]
+            h_total = len(h_df[~h_df['abstained']])
+            h_correct = len(h_df[(~h_df['abstained']) & (h_df['y_true'] == h_df['y_pred'])])
+            h_accuracy = h_correct / h_total if h_total > 0 else 0
+            
+            horizon_performance[horizon] = {
+                'total_predictions': h_total,
+                'correct_predictions': h_correct,
+                'accuracy': round(h_accuracy, 4),
+                'avg_confidence': round(h_df['confidence'].mean(), 4),
+                'coverage': round((h_total / len(h_df)), 4)
+            }
+        
+        # Time series performance (monthly)
+        df['month'] = pd.to_datetime(df['date']).dt.to_period('M')
+        monthly_performance = df.groupby('month').apply(
+            lambda x: pd.Series({
+                'accuracy': (x['y_true'] == x['y_pred']).mean(),
+                'coverage': (~x['abstained']).mean(),
+                'avg_confidence': x['confidence'].mean()
+            })
+        ).round(4).to_dict()
+        
+        return {
+            'overall': {
+                'total_predictions': total_predictions,
+                'correct_predictions': correct_predictions,
+                'accuracy': round(accuracy, 4),
+                'coverage': round((total_predictions / len(df)), 4)
+            },
+            'by_horizon': horizon_performance,
+            'time_series': monthly_performance,
+            'summary_stats': {
+                'date_range': [str(df['date'].min()), str(df['date'].max())],
+                'unique_tickers': df['ticker'].nunique(),
+                'total_records': len(df)
+            }
+        }
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_csv(request, pk):
+    try:
+        upload_record = CSVUploadRecord.objects.get(pk=pk, user=request.user)
+    except CSVUploadRecord.DoesNotExist:
+        return Response({'error': 'CSV upload not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Set up paths
+    analysis_dir = os.path.join(settings.BASE_DIR, '..', 'Data Analysis')
+    analysis_script_path = os.path.join(analysis_dir, 'main_model_file_stable_2_extended_future_prediciton.py')
+    
+    try:
+        # Change to analysis directory
+        original_cwd = os.getcwd()
+        os.chdir(analysis_dir)
+        
+        # Run analysis
+        cmd = [
+            'python', 'main_model_file_stable_2_extended_future_prediciton.py',
+            '--mode', 'forecast',
+            '--excel', 'MXUS_Data.xlsx',
+            '--out', f'results_{pk}',
+            '--model', 'logit'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        os.chdir(original_cwd)
+        
+        if result.returncode != 0:
+            logger.error(f"Analysis failed for pk={pk}. Stderr: {result.stderr}")
+            return Response({
+                'error': 'Analysis failed',
+                'details': result.stderr
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Create AnalysisResult record
+        analysis_result = AnalysisResult.objects.create(
+            csv_upload=upload_record,
+            status='completed',
+            parameters={'mode': 'forecast', 'model': 'logit'}
+        )
+        
+        # Parse and save forecast results
+        results_dir = Path(analysis_dir) / f'results_{pk}'
+        forecast_files = list(results_dir.glob('forecast_*.csv'))
+        
+        if forecast_files:
+            latest_forecast = max(forecast_files, key=os.path.getctime)
+            analysis_result.result_file = str(latest_forecast.relative_to(Path(settings.BASE_DIR).parent))
+            analysis_result.save()
+            
+            # Parse CSV and create ForecastResult records
+            df = pd.read_csv(latest_forecast)
+            forecast_records = []
+            
+            for _, row in df.iterrows():
+                forecast_records.append(ForecastResult(
+                    analysis=analysis_result,
+                    ticker=row.get('ticker', ''),
+                    date=pd.to_datetime(row.get('date')).date(),
+                    horizon=row.get('horizon', ''),
+                    raw_probability=float(row.get('raw_probability', 0)),
+                    calibrated_probability=float(row.get('calibrated_probability', 0)),
+                    expected_move=float(row.get('expected_move', 0)),
+                    prediction=int(row.get('prediction', 0)),
+                    confidence=float(row.get('confidence', 0)),
+                    prediction_interval_low=float(row.get('prediction_interval_low', 0)),
+                    prediction_interval_high=float(row.get('prediction_interval_high', 0)),
+                    abstained=bool(row.get('abstained', False))
+                ))
+            
+            # Bulk create for efficiency
+            ForecastResult.objects.bulk_create(forecast_records, batch_size=1000)
+            
+            return Response({
+                'message': 'Analysis completed successfully',
+                'analysis_id': analysis_result.id,
+                'forecast_count': len(forecast_records)
+            })
+        else:
+            return Response({'error': 'No forecast results generated'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except Exception as e:
+        os.chdir(original_cwd)
+        logger.error(f"Analysis failed for pk={pk}: {str(e)}")
+        return Response({'error': f'Analysis failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

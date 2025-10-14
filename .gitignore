@@ -40,8 +40,51 @@ backend/backend/db-media/
 .DS_Store
 Thumbs.db
 
-Data Analysis/results/*.csv
+# Data Analysis results and outputs (IMPORTANT: Exclude large files)
+Data Analysis/results/
+Data Analysis/outputs/
+Data Analysis/test_results/
+Data Analysis/charts/
+Data Analysis/logs/
 
+# Data files
 Data Analysis/MXUS_Data.xlsx
-
 Data Analysis/*.xlsx
+Data Analysis/*.csv
+Data Analysis/Data/*.csv
+
+# Backend uploaded files and results
+backend/db-media/
+backend/media/
+
+# Large Python cache directories
+*/__pycache__/
+**/__pycache__/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Large data and model files
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.parquet
+
+# Log files
+*.log
+**/*.log
+
+# Temporary files
+*.tmp
+*.temp
+**/*.tmp
+**/*.temp
+
+# Frontend dependencies
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/build/
