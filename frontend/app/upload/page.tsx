@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import ModelSelectionCard from "@/components/ModelSelectionCard";
+import type { ModelType } from "@/types/analysis";
 import {format} from "node:url";
 
 /**
@@ -20,6 +22,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [selectedModel, setSelectedModel] = useState<ModelType>("beta-forecasting");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +76,7 @@ export default function UploadPage() {
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("model_type", selectedModel);
 
     try {
       const res = await api.post(
@@ -95,7 +99,7 @@ export default function UploadPage() {
       const msg = res.data?.message ?? "CSV Uploaded Successfully";
       const uploadId = res.data?.upload?.id;
 
-      setSuccessMsg(msg);
+      setSuccessMsg(`${msg} - Model: ${selectedModel === 'mean-reversion' ? 'Mean-Reversion (MR-PROD)' : 'β-Forecasting'}`);
 
       // Redirect after a short pause. Use /uploads since it already exists in your app.
       setTimeout(() => {
@@ -133,13 +137,20 @@ export default function UploadPage() {
           </p>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-8">
-          {/* Upload Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle>File Upload</CardTitle>
-              <CardDescription>Drag and drop your file or click to browse</CardDescription>
-            </CardHeader>
+        <div className="space-y-8">
+          {/* Model Selection */}
+          <ModelSelectionCard 
+            selectedModel={selectedModel} 
+            onModelChange={setSelectedModel} 
+          />
+          
+          <div className="grid lg:grid-cols-2 gap-8">
+            {/* Upload Section */}
+            <Card>
+              <CardHeader>
+                <CardTitle>File Upload</CardTitle>
+                <CardDescription>Drag and drop your file or click to browse</CardDescription>
+              </CardHeader>
             <CardContent>
               <div
                 className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
@@ -276,6 +287,7 @@ export default function UploadPage() {
               </div>
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
     </div>

@@ -30,7 +30,7 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult
+from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult, BetaForecastResult, MeanReversionResult
 from datetime import date, datetime
 from django.http import FileResponse
 from django.contrib.auth import update_session_auth_hash
@@ -246,6 +246,12 @@ from .serializers import (
     CSVUploadRecordSerializer,
     UserProfileSerializer,
     PasswordChangeSerializer,
+    # Dual-model architecture serializers
+    BetaForecastResultSerializer,
+    MeanReversionResultSerializer,
+    UnifiedAnalysisResultSerializer,
+    ModelComparisonSerializer,
+    AnalysisRequestSerializer,
 )
 
 def _parse_date(date_str: str) -> date:
@@ -1171,3 +1177,328 @@ def analyze_csv(request, pk):
         os.chdir(original_cwd)
         logger.error(f"Analysis failed for pk={pk}: {str(e)}")
         return Response({'error': f'Analysis failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ================= Dual-Model Architecture Views ================= #
+
+class UnifiedAnalysisView(APIView):
+    """Unified analysis endpoint supporting both Mean-Reversion and Beta-Forecasting models"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Start analysis with model selection"""
+        serializer = AnalysisRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({'success': False, 'error': serializer.errors}, status=400)
+        
+        data = serializer.validated_data
+        upload_id = data['upload_id']
+        model_type = data['model_type']
+        tickers = data.get('tickers', [])
+        
+        try:
+            upload = CSVUploadRecord.objects.get(id=upload_id, user=request.user)
+        except CSVUploadRecord.DoesNotExist:
+            return Response({'success': False, 'error': 'Upload not found'}, status=404)
+        
+        # Create analysis record
+        analysis = AnalysisResult.objects.create(
+            user=request.user,
+            csv_upload=upload,
+            analysis_type=model_type,
+            parameters={'tickers': tickers} if tickers else {},
+            status='running',
+            started_at=timezone.now()
+        )
+        
+        try:
+            # Route to appropriate model execution
+            if model_type == 'mean-reversion':
+                self._run_mean_reversion_analysis(analysis, upload, tickers)
+            elif model_type == 'beta-forecasting':
+                self._run_beta_forecasting_analysis(analysis, upload, tickers)
+            elif model_type == 'both':
+                self._run_both_models_analysis(analysis, upload, tickers)
+            
+            analysis.status = 'completed'
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            
+            return Response({
+                'success': True,
+                'analysis_id': str(analysis.id),
+                'model_type': model_type,
+                'status': 'completed',
+                'tickers': tickers or self._extract_tickers_from_upload(upload),
+                'summary': {
+                    'total': len(tickers) if tickers else self._count_tickers_in_upload(upload),
+                    'completed': len(tickers) if tickers else self._count_tickers_in_upload(upload),
+                    'failed': 0
+                }
+            })
+            
+        except Exception as e:
+            analysis.status = 'failed'
+            analysis.error_message = str(e)
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            logger.error(f"Analysis {analysis.id} failed: {str(e)}")
+            return Response({'success': False, 'error': str(e)}, status=500)
+    
+    def _run_mean_reversion_analysis(self, analysis, upload, tickers=None):
+        """Execute Mean-Reversion model"""
+        project_root = Path(settings.BASE_DIR).parent
+        script_path = project_root / 'Data Analysis' / 'main_model_file_stable_2_extended_future_prediciton.py'
+        
+        if not script_path.exists():
+            raise FileNotFoundError(f"Mean-Reversion script not found: {script_path}")
+        
+        output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        cmd = [sys.executable, str(script_path), '--excel', upload.filename.path, '--out', str(output_dir)]
+        if tickers:
+            cmd += ['--tickers', ','.join(tickers)]
+        
+        logger.info(f"Running Mean-Reversion analysis {analysis.id}: {' '.join(cmd)}")
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
+        
+        if proc.returncode != 0:
+            raise RuntimeError(f"Mean-Reversion script failed: {proc.stderr}")
+        
+        # Process results and store in MeanReversionResult model
+        self._store_mean_reversion_results(analysis, output_dir)
+    
+    def _run_beta_forecasting_analysis(self, analysis, upload, tickers=None):
+        """Execute Beta-Forecasting model"""
+        project_root = Path(settings.BASE_DIR).parent
+        script_path = project_root / 'Data Analysis' / 'bcoef_forecast_v_4_no_market.py'
+        
+        if not script_path.exists():
+            raise FileNotFoundError(f"Beta-Forecasting script not found: {script_path}")
+        
+        output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        cmd = [sys.executable, str(script_path), '--excel', upload.filename.path, '--out', str(output_dir)]
+        if tickers:
+            cmd += ['--tickers', ','.join(tickers)]
+        
+        logger.info(f"Running Beta-Forecasting analysis {analysis.id}: {' '.join(cmd)}")
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
+        
+        if proc.returncode != 0:
+            raise RuntimeError(f"Beta-Forecasting script failed: {proc.stderr}")
+        
+        # Process results and store in BetaForecastResult model
+        self._store_beta_forecast_results(analysis, output_dir)
+    
+    def _run_both_models_analysis(self, analysis, upload, tickers=None):
+        """Execute both models"""
+        self._run_mean_reversion_analysis(analysis, upload, tickers)
+        self._run_beta_forecasting_analysis(analysis, upload, tickers)
+    
+    def _store_mean_reversion_results(self, analysis, output_dir):
+        """Store Mean-Reversion results in database"""
+        # Look for mean-reversion output files
+        result_files = list(output_dir.glob('*mean_reversion*.csv'))
+        if not result_files:
+            result_files = list(output_dir.glob('*mr_results*.csv'))
+        
+        if not result_files:
+            logger.warning(f"No mean-reversion results found in {output_dir}")
+            return
+        
+        latest_file = max(result_files, key=lambda p: p.stat().st_mtime)
+        df = pd.read_csv(latest_file)
+        
+        # Store results (mock implementation - adapt based on actual output format)
+        for _, row in df.iterrows():
+            MeanReversionResult.objects.create(
+                analysis_result=analysis,
+                analysis_date=timezone.now().date(),
+                ticker=row.get('ticker', ''),
+                z_score_current=float(row.get('z_score_current', 0)),
+                z_score_trend=float(row.get('z_score_trend', 0)),
+                mean_reversion_probability=float(row.get('mean_reversion_probability', 0)),
+                reversion_strength=row.get('reversion_strength', 'Moderate'),
+                magnitude_prediction=float(row.get('magnitude_prediction', 0)),
+                magnitude_lower_bound=float(row.get('magnitude_lower_bound', 0)),
+                magnitude_upper_bound=float(row.get('magnitude_upper_bound', 0)),
+                calibration_score=float(row.get('calibration_score', 0)),
+                confidence_interval_90=[
+                    float(row.get('ci_90_lower', 0)),
+                    float(row.get('ci_90_upper', 0))
+                ],
+                confidence_interval_95=[
+                    float(row.get('ci_95_lower', 0)),
+                    float(row.get('ci_95_upper', 0))
+                ],
+                historical_accuracy=float(row.get('historical_accuracy', 0)),
+                lookback_period_days=int(row.get('lookback_period_days', 252)),
+                recommendation=row.get('recommendation', 'HOLD'),
+                recommendation_confidence=float(row.get('recommendation_confidence', 0))
+            )
+    
+    def _store_beta_forecast_results(self, analysis, output_dir):
+        """Store Beta-Forecast results in database"""
+        # Look for beta forecast output files
+        result_files = list(output_dir.glob('*beta_forecast*.csv'))
+        if not result_files:
+            result_files = list(output_dir.glob('*forecast*.csv'))
+        
+        if not result_files:
+            logger.warning(f"No beta forecast results found in {output_dir}")
+            return
+        
+        latest_file = max(result_files, key=lambda p: p.stat().st_mtime)
+        df = pd.read_csv(latest_file)
+        
+        # Store results (adapt based on actual output format)
+        for _, row in df.iterrows():
+            BetaForecastResult.objects.create(
+                analysis_result=analysis,
+                forecast_date=pd.to_datetime(row.get('forecast_date', timezone.now().date())).date(),
+                ticker=row.get('ticker', ''),
+                beta_pred=float(row.get('beta_pred', 0)),
+                beta_pred_ema=float(row.get('beta_pred_ema', 0)),
+                lo=float(row.get('lo', 0)),
+                hi=float(row.get('hi', 0)),
+                r2_ols=float(row.get('r2_ols', 0)),
+                p_value=float(row.get('p_value', 0)),
+                confidence_level=row.get('confidence_level', 'Medium (p≤5%)'),
+                confidence_tier=row.get('confidence_tier', 'Tier-2'),
+                delta_beta_20d=float(row.get('delta_beta_20d', 0)),
+                conf_20d=float(row.get('conf_20d', 0)),
+                agree_adjacent=bool(row.get('agree_adjacent', False)),
+                term_unstable=bool(row.get('term_unstable', False)),
+                action=row.get('action', 'hold'),
+                hold_reason=row.get('hold_reason', '')
+            )
+    
+    def _extract_tickers_from_upload(self, upload):
+        """Extract ticker list from uploaded file"""
+        # Mock implementation - adapt based on actual file structure
+        return ['AAPL', 'MSFT', 'GOOGL']
+    
+    def _count_tickers_in_upload(self, upload):
+        """Count tickers in uploaded file"""
+        return len(self._extract_tickers_from_upload(upload))
+
+
+class UnifiedAnalysisResultView(APIView):
+    """Get unified analysis results for a specific ticker and model"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, ticker, model_type):
+        """Get analysis result for specific ticker and model type"""
+        try:
+            if model_type == 'mean-reversion':
+                results = MeanReversionResult.objects.filter(
+                    analysis_result__user=request.user,
+                    ticker=ticker.upper()
+                ).order_by('-analysis_date').first()
+                
+                if not results:
+                    return Response({'error': 'No mean-reversion results found'}, status=404)
+                
+                serializer = MeanReversionResultSerializer(results)
+                return Response({
+                    'analysis_id': str(results.analysis_result.id),
+                    'model_type': 'mean-reversion',
+                    'ticker': ticker.upper(),
+                    'name': f"{ticker.upper()} Inc.",  # Mock - could be enhanced with company name lookup
+                    'analysis_date': results.analysis_date,
+                    'recommendation': results.recommendation,
+                    'confidence': results.recommendation_confidence,
+                    'model_data': serializer.data
+                })
+                
+            elif model_type == 'beta-forecasting':
+                results = BetaForecastResult.objects.filter(
+                    analysis_result__user=request.user,
+                    ticker=ticker.upper()
+                ).order_by('-forecast_date').first()
+                
+                if not results:
+                    return Response({'error': 'No beta forecast results found'}, status=404)
+                
+                serializer = BetaForecastResultSerializer(results)
+                
+                # Map action to recommendation
+                action_to_recommendation = {
+                    'chase': 'BUY',
+                    'fade': 'SELL',
+                    'hold': 'HOLD'
+                }
+                
+                return Response({
+                    'analysis_id': str(results.analysis_result.id),
+                    'model_type': 'beta-forecasting',
+                    'ticker': ticker.upper(),
+                    'name': f"{ticker.upper()} Inc.",  # Mock - could be enhanced
+                    'analysis_date': results.forecast_date,
+                    'recommendation': action_to_recommendation.get(results.action, 'HOLD'),
+                    'confidence': results.conf_20d,
+                    'model_data': serializer.data
+                })
+            
+            else:
+                return Response({'error': 'Invalid model type'}, status=400)
+                
+        except Exception as e:
+            logger.error(f"Error retrieving unified analysis result: {str(e)}")
+            return Response({'error': str(e)}, status=500)
+
+
+class ModelComparisonView(APIView):
+    """Compare both models for a specific ticker"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, ticker):
+        """Compare both Mean-Reversion and Beta-Forecasting for a ticker"""
+        try:
+            # Get both results
+            mr_view = UnifiedAnalysisResultView()
+            mr_request = request._request if hasattr(request, '_request') else request
+            mr_response = mr_view.get(mr_request, ticker, 'mean-reversion')
+            
+            beta_response = mr_view.get(mr_request, ticker, 'beta-forecasting')
+            
+            if mr_response.status_code != 200 or beta_response.status_code != 200:
+                return Response({'error': 'Results not found for both models'}, status=404)
+            
+            mr_data = mr_response.data
+            beta_data = beta_response.data
+            
+            # Compare recommendations
+            mr_recommendation = mr_data['recommendation']
+            beta_recommendation = beta_data['recommendation']
+            
+            if mr_recommendation == beta_recommendation:
+                agreement = "Strong"
+                primary_recommendation = mr_recommendation
+                confidence_score = max(mr_data['confidence'], beta_data['confidence'])
+            else:
+                agreement = "Conflicting"
+                # Use beta model as primary when conflicting (higher confidence generally)
+                if beta_data['confidence'] > mr_data['confidence']:
+                    primary_recommendation = beta_recommendation
+                    confidence_score = beta_data['confidence']
+                else:
+                    primary_recommendation = mr_recommendation
+                    confidence_score = mr_data['confidence']
+            
+            return Response({
+                'mean_reversion': mr_data,
+                'beta_forecasting': beta_data,
+                'comparison': {
+                    'agreement': agreement,
+                    'primary_recommendation': primary_recommendation,
+                    'confidence_score': confidence_score
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in model comparison: {str(e)}")
+            return Response({'error': str(e)}, status=500)

@@ -142,8 +142,8 @@ export default function StockDetailPage() {
 
   // Calculate min and max dates for the DateRange component
   const allDates = stock.data.map((row) => new Date(row.date));
-  const minDate = new Date(Math.min(...allDates));
-  const maxDate = new Date(Math.max(...allDates));
+  const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
+  const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
 
   return (
     <div className="p-6 max-w-5xl mx-auto">

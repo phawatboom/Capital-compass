@@ -19,6 +19,10 @@ from .views import (
     profile_view,
     profile_avatar,
     change_password,
+    # Dual-model architecture views
+    UnifiedAnalysisView,
+    UnifiedAnalysisResultView,
+    ModelComparisonView,
 )
 
 urlpatterns = [
@@ -45,6 +49,11 @@ urlpatterns = [
 
     # Model analysis
     path('csv-uploads/<int:pk>/analyze/', analyze_upload, name='analyze-upload'),
+    
+    # Dual-model architecture endpoints
+    path('api/analysis/unified/', UnifiedAnalysisView.as_view(), name='unified-analysis'),
+    path('api/analysis/<str:ticker>/<str:model_type>/', UnifiedAnalysisResultView.as_view(), name='unified-analysis-result'),
+    path('api/analysis/<str:ticker>/compare/', ModelComparisonView.as_view(), name='model-comparison'),
 ]
 
 if settings.DEBUG:

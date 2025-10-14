@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Stock, StockData, CSVUploadRecord, UserProfile
+from .models import Stock, StockData, CSVUploadRecord, UserProfile, BetaForecastResult, MeanReversionResult
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -110,3 +110,85 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class PasswordChangeSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True)
+
+
+# Dual-Model Architecture Serializers
+
+class BetaForecastResultSerializer(serializers.ModelSerializer):
+    """Serializer for beta forecasting results"""
+    
+    class Meta:
+        model = BetaForecastResult
+        fields = [
+            'forecast_date', 'ticker', 'beta_pred', 'beta_pred_ema',
+            'lo', 'hi', 'r2_ols', 'p_value', 'confidence_level',
+            'confidence_tier', 'delta_beta_20d', 'conf_20d',
+            'agree_adjacent', 'term_unstable', 'action', 'hold_reason'
+        ]
+
+
+class MeanReversionResultSerializer(serializers.ModelSerializer):
+    """Serializer for mean-reversion analysis results"""
+    
+    class Meta:
+        model = MeanReversionResult
+        fields = [
+            'analysis_date', 'ticker', 'z_score_current', 'z_score_trend',
+            'mean_reversion_probability', 'reversion_strength',
+            'magnitude_prediction', 'magnitude_lower_bound', 'magnitude_upper_bound',
+            'calibration_score', 'confidence_interval_90', 'confidence_interval_95',
+            'historical_accuracy', 'lookback_period_days',
+            'recommendation', 'recommendation_confidence'
+        ]
+
+
+class UnifiedAnalysisResultSerializer(serializers.Serializer):
+    """Unified serializer supporting both model types"""
+    
+    MODEL_TYPE_CHOICES = [
+        ('mean-reversion', 'Mean Reversion'),
+        ('beta-forecasting', 'Beta Forecasting'),
+    ]
+    
+    analysis_id = serializers.CharField()
+    model_type = serializers.ChoiceField(choices=MODEL_TYPE_CHOICES)
+    ticker = serializers.CharField()
+    name = serializers.CharField()
+    analysis_date = serializers.DateField()
+    recommendation = serializers.ChoiceField(choices=[('BUY', 'Buy'), ('SELL', 'Sell'), ('HOLD', 'Hold')])
+    confidence = serializers.FloatField()
+    model_data = serializers.SerializerMethodField()
+    
+    def get_model_data(self, obj):
+        """Return model-specific data based on model_type"""
+        if obj.get('model_type') == 'mean-reversion':
+            return obj.get('mean_reversion_data', {})
+        elif obj.get('model_type') == 'beta-forecasting':
+            return obj.get('beta_forecast_data', {})
+        return {}
+
+
+class ModelComparisonSerializer(serializers.Serializer):
+    """Serializer for comparing both models"""
+    
+    mean_reversion = UnifiedAnalysisResultSerializer()
+    beta_forecasting = UnifiedAnalysisResultSerializer()
+    comparison = serializers.DictField(child=serializers.CharField())
+
+
+class AnalysisRequestSerializer(serializers.Serializer):
+    """Serializer for analysis requests with model selection"""
+    
+    upload_id = serializers.CharField()
+    model_type = serializers.ChoiceField(
+        choices=[
+            ('mean-reversion', 'Mean Reversion'),
+            ('beta-forecasting', 'Beta Forecasting'),
+            ('both', 'Both Models'),
+        ]
+    )
+    tickers = serializers.ListField(
+        child=serializers.CharField(max_length=10),
+        required=False,
+        help_text="Optional list of specific tickers to analyze"
+    )

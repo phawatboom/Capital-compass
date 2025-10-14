@@ -129,6 +129,125 @@ class BacktestResult(models.Model):
     def __str__(self):
         return f"{self.ticker} {self.date} ({self.horizon}): {'+' if self.y_pred > 0 else '-'} ({self.confidence:.2f})"
 
+class BetaForecastResult(models.Model):
+    """New model for beta forecasting results from the enhanced pipeline"""
+    analysis_result = models.ForeignKey(AnalysisResult, on_delete=models.CASCADE, related_name='beta_forecasts')
+    forecast_date = models.DateField()
+    ticker = models.CharField(max_length=10)
+    
+    # Core beta prediction
+    beta_pred = models.FloatField(help_text="Predicted beta coefficient")
+    beta_pred_ema = models.FloatField(null=True, blank=True, help_text="EMA-smoothed beta prediction")
+    
+    # Confidence intervals
+    lo = models.FloatField(help_text="Lower confidence bound")
+    hi = models.FloatField(help_text="Upper confidence bound")
+    
+    # Statistical quality measures
+    r2_ols = models.FloatField(help_text="R-squared from OLS regression")
+    p_value = models.FloatField(help_text="Statistical p-value")
+    confidence_level = models.CharField(
+        max_length=20,
+        choices=[
+            ('High (p≤1%)', 'High (p≤1%)'),
+            ('Medium (p≤5%)', 'Medium (p≤5%)'),
+            ('Low (p>5%)', 'Low (p>5%)'),
+        ],
+        help_text="Statistical confidence level"
+    )
+    confidence_tier = models.CharField(max_length=10, help_text="Risk tier classification")
+    
+    # Business context
+    delta_beta_20d = models.FloatField(help_text="Change vs 1-year median realized beta")
+    conf_20d = models.FloatField(help_text="Prediction confidence score [0,1]")
+    
+    # Agreement and stability checks
+    agree_adjacent = models.BooleanField(help_text="Adjacent horizons agree on direction")
+    term_unstable = models.BooleanField(help_text="Term structure shows instability")
+    
+    # Action recommendation
+    action = models.CharField(
+        max_length=10,
+        choices=[
+            ('chase', 'Chase'),
+            ('fade', 'Fade'),
+            ('hold', 'Hold'),
+        ],
+        help_text="Recommended trading action"
+    )
+    hold_reason = models.CharField(max_length=50, blank=True, help_text="Reason for hold recommendation")
+    
+    class Meta:
+        unique_together = ('analysis_result', 'ticker', 'forecast_date')
+        indexes = [
+            models.Index(fields=['ticker', 'forecast_date']),
+            models.Index(fields=['action']),
+            models.Index(fields=['confidence_level']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} {self.forecast_date}: β={self.beta_pred:.3f} ({self.action})"
+
+
+class MeanReversionResult(models.Model):
+    """Model for mean-reversion analysis results from the legacy pipeline"""
+    analysis_result = models.ForeignKey(AnalysisResult, on_delete=models.CASCADE, related_name='mean_reversion_results')
+    analysis_date = models.DateField()
+    ticker = models.CharField(max_length=10)
+    
+    # Z-score analysis
+    z_score_current = models.FloatField(help_text="Current price Z-score")
+    z_score_trend = models.FloatField(help_text="Z-score trend over analysis period")
+    
+    # Mean reversion probabilities
+    mean_reversion_probability = models.FloatField(help_text="Probability of mean reversion [0,1]")
+    reversion_strength = models.CharField(
+        max_length=20,
+        choices=[
+            ('Strong', 'Strong'),
+            ('Moderate', 'Moderate'),
+            ('Weak', 'Weak'),
+        ],
+        help_text="Expected strength of mean reversion"
+    )
+    
+    # Magnitude predictions with conformal intervals
+    magnitude_prediction = models.FloatField(help_text="Predicted magnitude of price movement")
+    magnitude_lower_bound = models.FloatField(help_text="Lower conformal bound for magnitude")
+    magnitude_upper_bound = models.FloatField(help_text="Upper conformal bound for magnitude")
+    
+    # Statistical confidence measures
+    calibration_score = models.FloatField(help_text="Isotonic calibration confidence score")
+    confidence_interval_90 = models.JSONField(help_text="90% confidence interval [lower, upper]")
+    confidence_interval_95 = models.JSONField(help_text="95% confidence interval [lower, upper]")
+    
+    # Historical performance context
+    historical_accuracy = models.FloatField(help_text="Historical accuracy rate for similar signals")
+    lookback_period_days = models.IntegerField(help_text="Analysis lookback period in days")
+    
+    # Recommendation
+    recommendation = models.CharField(
+        max_length=10,
+        choices=[
+            ('BUY', 'Buy'),
+            ('SELL', 'Sell'),
+            ('HOLD', 'Hold'),
+        ],
+        help_text="Trading recommendation based on mean reversion analysis"
+    )
+    recommendation_confidence = models.FloatField(help_text="Confidence in recommendation [0,1]")
+    
+    class Meta:
+        unique_together = ('analysis_result', 'ticker', 'analysis_date')
+        indexes = [
+            models.Index(fields=['ticker', 'analysis_date']),
+            models.Index(fields=['recommendation']),
+            models.Index(fields=['reversion_strength']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} {self.analysis_date}: MR={self.mean_reversion_probability:.3f} ({self.recommendation})"
+
 
 def select_latest_forecast_file(dir_path: str) -> Optional[Path]:
     """Return the latest forecast_*.csv file in dir_path.
