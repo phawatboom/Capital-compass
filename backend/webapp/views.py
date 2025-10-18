@@ -1502,3 +1502,222 @@ class ModelComparisonView(APIView):
         except Exception as e:
             logger.error(f"Error in model comparison: {str(e)}")
             return Response({'error': str(e)}, status=500)
+
+
+# ================= Beta Coefficient Model Output API Views ================= #
+
+class BetaRealizedListView(APIView):
+    """API endpoint for beta realized data from betas_20d.csv"""
+    
+    def get(self, request):
+        from .models import BetaRealized
+        from .serializers import BetaRealizedSerializer
+        
+        ticker = request.query_params.get('ticker')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        
+        queryset = BetaRealized.objects.all()
+        
+        if ticker:
+            queryset = queryset.filter(ticker=ticker)
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        
+        queryset = queryset.order_by('-date', 'ticker')[:1000]  # Limit results
+        
+        serializer = BetaRealizedSerializer(queryset, many=True)
+        return Response({
+            'count': queryset.count(),
+            'results': serializer.data
+        })
+
+
+class ForecastEvaluationListView(APIView):
+    """API endpoint for forecast evaluation data from forecast_eval_20d.csv"""
+    
+    def get(self, request):
+        from .models import ForecastEvaluation
+        from .serializers import ForecastEvaluationSerializer
+        
+        ticker = request.query_params.get('ticker')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        min_significance = request.query_params.get('min_significance', 0.7)
+        
+        queryset = ForecastEvaluation.objects.all()
+        
+        if ticker:
+            queryset = queryset.filter(ticker=ticker)
+        if start_date:
+            queryset = queryset.filter(date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        
+        queryset = queryset.filter(significance_score__gte=float(min_significance))
+        queryset = queryset.order_by('-date', 'ticker')[:1000]
+        
+        serializer = ForecastEvaluationSerializer(queryset, many=True)
+        return Response({
+            'count': queryset.count(),
+            'results': serializer.data
+        })
+
+
+class BetaCoefficientSummaryView(APIView):
+    """Summary statistics for beta coefficient predictions"""
+    
+    def get(self, request):
+        from .models import ForecastEvaluation
+        from django.db.models import Avg, Count, Max
+        
+        # Get summary by ticker
+        summary_data = []
+        
+        for ticker_data in ForecastEvaluation.objects.values('ticker').annotate(
+            forecast_count=Count('id'),
+            avg_r2=Avg('r2_ols'),
+            latest_date=Max('date')
+        ).order_by('-forecast_count'):
+            
+            ticker = ticker_data['ticker']
+            latest_record = ForecastEvaluation.objects.filter(
+                ticker=ticker,
+                date=ticker_data['latest_date']
+            ).first()
+            
+            if latest_record:
+                # Calculate prediction accuracy (simplified)
+                prediction_error = abs(latest_record.beta_pred - latest_record.beta_true) if latest_record.beta_true else None
+                accuracy = 1 - min(prediction_error, 1.0) if prediction_error is not None else None
+                
+                confidence_level = 'High' if latest_record.significance_score > 0.8 else 'Medium' if latest_record.significance_score > 0.6 else 'Low'
+                
+                summary_data.append({
+                    'ticker': ticker,
+                    'latest_date': latest_record.date,
+                    'latest_beta_pred': latest_record.beta_pred,
+                    'latest_beta_true': latest_record.beta_true,
+                    'avg_r2_ols': ticker_data['avg_r2'],
+                    'prediction_accuracy': accuracy,
+                    'forecast_count': ticker_data['forecast_count'],
+                    'confidence_level': confidence_level
+                })
+        
+        return Response({
+            'summary': summary_data[:50]  # Top 50 tickers
+        })
+
+
+class BetaCoefficientTimeSeriesView(APIView):
+    """Time series data for a specific ticker's beta coefficient predictions"""
+    
+    def get(self, request, ticker):
+        from .models import ForecastEvaluation
+        
+        queryset = ForecastEvaluation.objects.filter(
+            ticker=ticker
+        ).order_by('date')
+        
+        dates = []
+        beta_pred = []
+        beta_true = []
+        confidence_bands = []
+        
+        for record in queryset:
+            dates.append(record.date)
+            beta_pred.append(record.beta_pred)
+            beta_true.append(record.beta_true)
+            
+            # Calculate confidence bands using the band value
+            confidence_bands.append({
+                'lower': record.beta_pred - record.band,
+                'upper': record.beta_pred + record.band
+            })
+        
+        return Response({
+            'ticker': ticker,
+            'dates': dates,
+            'beta_pred': beta_pred,
+            'beta_true': beta_true,
+            'confidence_bands': confidence_bands
+        })
+
+
+class ImportBetaDataView(APIView):
+    """Import beta coefficient data from CSV files"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        from .models import BetaRealized, ForecastEvaluation
+        import csv
+        from django.conf import settings
+        
+        try:
+            # Import betas_20d.csv
+            betas_file = os.path.join(settings.BASE_DIR.parent, 'outputs', 'betas_20d.csv')
+            if os.path.exists(betas_file):
+                with open(betas_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    beta_objects = []
+                    
+                    for row in reader:
+                        if row['Date'] and row['ticker']:  # Skip empty rows
+                            try:
+                                beta_obj = BetaRealized(
+                                    date=datetime.strptime(row['Date'], '%m/%d/%Y').date(),
+                                    ticker=row['ticker'],
+                                    beta_realised=float(row['beta_realised']) if row['beta_realised'] else None,
+                                    r2_ols_x=float(row['r2_ols_x']) if row['r2_ols_x'] else None,
+                                    r2_ols_y=float(row['r2_ols_y']) if row['r2_ols_y'] else None,
+                                    p_value=float(row['p_value']) if row['p_value'] else None,
+                                    significance_score=float(row['significance_score']) if row['significance_score'] else None,
+                                    beta_pred=float(row['beta_pred']) if row['beta_pred'] else None,
+                                    beta_true=float(row['beta_true']) if row['beta_true'] else None,
+                                    band=float(row['band']) if row['band'] else None,
+                                    lo=float(row['lo']) if row['lo'] else None,
+                                    hi=float(row['hi']) if row['hi'] else None,
+                                )
+                                beta_objects.append(beta_obj)
+                            except (ValueError, KeyError) as e:
+                                continue  # Skip invalid rows
+                    
+                    # Bulk create with ignore conflicts
+                    BetaRealized.objects.bulk_create(beta_objects, ignore_conflicts=True, batch_size=1000)
+            
+            # Import forecast_eval_20d.csv
+            forecast_file = os.path.join(settings.BASE_DIR.parent, 'outputs', 'forecast_eval_20d.csv')
+            if os.path.exists(forecast_file):
+                with open(forecast_file, 'r') as f:
+                    reader = csv.DictReader(f)
+                    forecast_objects = []
+                    
+                    for row in reader:
+                        try:
+                            forecast_obj = ForecastEvaluation(
+                                date=datetime.strptime(row['Date'], '%m/%d/%Y').date(),
+                                ticker=row['ticker'],
+                                r2_ols=float(row['r2_ols']),
+                                p_value=float(row['p_value']),
+                                significance_score=float(row['significance_score']),
+                                beta_pred=float(row['beta_pred']),
+                                beta_true=float(row['beta_true']),
+                                band=float(row['band']),
+                            )
+                            forecast_objects.append(forecast_obj)
+                        except (ValueError, KeyError) as e:
+                            continue
+                    
+                    ForecastEvaluation.objects.bulk_create(forecast_objects, ignore_conflicts=True, batch_size=1000)
+            
+            return Response({
+                'message': 'Beta coefficient data imported successfully',
+                'beta_records': BetaRealized.objects.count(),
+                'forecast_records': ForecastEvaluation.objects.count()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error importing beta data: {str(e)}")
+            return Response({'error': str(e)}, status=500)

@@ -270,6 +270,54 @@ def select_latest_forecast_file(dir_path: str) -> Optional[Path]:
     candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     return candidates[0]
 
+# Beta Coefficient Model Output Support
+class BetaRealized(models.Model):
+    """Model for storing beta_20d.csv output data"""
+    date = models.DateField()
+    ticker = models.CharField(max_length=10)
+    beta_realised = models.FloatField(null=True, blank=True)
+    r2_ols_x = models.FloatField(null=True, blank=True)
+    r2_ols_y = models.FloatField(null=True, blank=True)
+    p_value = models.FloatField(null=True, blank=True)
+    significance_score = models.FloatField(null=True, blank=True)
+    beta_pred = models.FloatField(null=True, blank=True)
+    beta_true = models.FloatField(null=True, blank=True)
+    band = models.FloatField(null=True, blank=True)
+    lo = models.FloatField(null=True, blank=True)
+    hi = models.FloatField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('date', 'ticker')
+        indexes = [
+            models.Index(fields=['ticker', 'date']),
+            models.Index(fields=['date']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} {self.date}: β_realized={self.beta_realised}"
+
+class ForecastEvaluation(models.Model):
+    """Model for storing forecast_eval_20d.csv output data"""
+    date = models.DateField()
+    ticker = models.CharField(max_length=10)
+    r2_ols = models.FloatField()
+    p_value = models.FloatField()
+    significance_score = models.FloatField()
+    beta_pred = models.FloatField()
+    beta_true = models.FloatField()
+    band = models.FloatField()
+    
+    class Meta:
+        unique_together = ('date', 'ticker')
+        indexes = [
+            models.Index(fields=['ticker', 'date']),
+            models.Index(fields=['date']),
+            models.Index(fields=['significance_score']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} {self.date}: β_pred={self.beta_pred:.3f}, R²={self.r2_ols:.3f}"
+
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:

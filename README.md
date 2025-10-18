@@ -1,13 +1,283 @@
-## Hi Team Bobbers!
+# Beta Coefficient Forecasting Platform
 
+A comprehensive web application for forecasting and analyzing stock beta coefficients, built with Django REST Framework backend and Next.js frontend.
 
-## Team members and specializations
+## 👥 Team Bobbers
 
-| Name              | Spec            |
-|-------------------| --------------- |
+| Name              | Specialization            |
+|-------------------| ------------------------- |
 | Henri Chemla      | Web Application |
 | Trey Miller-Henry | Web Application |
 | Phawat Saengsiripongpun | Web Application |
+
+## 🎯 Overview
+
+This platform integrates sophisticated beta coefficient forecasting models with a modern web interface, enabling users to:
+
+- **Predict stock beta coefficients** using advanced ARIMA time series modeling
+- **Visualize forecasting results** with interactive charts and confidence intervals  
+- **Monitor prediction accuracy** with statistical validation (R², p-values, significance)
+- **Access real-time data** through comprehensive REST API endpoints
+- **Analyze market sensitivity** patterns across multiple stock portfolios
+
+## 🏗️ Architecture
+
+### Backend (Django REST Framework)
+- **API**: RESTful endpoints for data management and model results
+- **Database**: PostgreSQL with models for stock data and predictions
+- **Models**: Integration with beta coefficient forecasting pipeline
+- **Authentication**: User management and session handling
+
+### Frontend (Next.js + TypeScript)
+- **Dashboard**: Interactive beta coefficient visualization
+- **Charts**: Time series plots with confidence intervals
+- **Tables**: Sortable and filterable prediction summaries
+- **Responsive**: Mobile-friendly interface using Tailwind CSS
+
+### Data Pipeline
+- **Model**: Advanced beta coefficient forecasting with ARIMA and OLS
+- **Features**: Price-based predictors with statistical validation
+- **Outputs**: CSV files with predictions and evaluation metrics
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.12+
+- Node.js 18+
+- pnpm package manager
+- PostgreSQL (optional, SQLite for development)
+
+### Development Setup
+
+#### 1. Clone Repository
+```bash
+git clone <repository-url>
+cd capstone-project-s2-2025-team-11
+```
+
+#### 2. Backend Setup
+```bash
+cd backend
+conda create -n dashenv python=3.12
+conda activate dashenv
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py import_beta_data  # Import beta coefficient data
+python manage.py runserver 8000
+```
+
+#### 3. Frontend Setup
+```bash
+cd frontend
+pnpm install
+pnpm run dev
+```
+
+#### 4. Access Application
+- **Frontend**: http://localhost:3000
+- **Beta Dashboard**: http://localhost:3000/beta
+- **Backend API**: http://localhost:8000/api/
+
+### 📖 Deployment Guide
+
+For detailed production deployment instructions, see **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**
+
+### 1. Clone Repository
+```bash
+git clone <repository-url>
+cd capstone-project-s2-2025-team-11
+```
+
+### 2. Setup Backend
+```bash
+cd backend
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Setup database
+python manage.py migrate
+
+# Create superuser (optional)
+python manage.py createsuperuser
+
+# Run development server
+python manage.py runserver
+```
+
+### 3. Setup Frontend
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+```
+
+### 4. Access Application
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Admin Interface: http://localhost:8000/admin
+
+## 📊 Beta Coefficient Integration
+
+### Model Outputs
+The system processes two main CSV output files:
+
+1. **`betas_20d.csv`**: Historical beta realizations with predictions
+2. **`forecast_eval_20d.csv`**: Forecast evaluation and performance metrics
+
+### API Endpoints
+
+#### Beta Data Endpoints
+```
+GET  /api/beta/summary/              # Summary statistics by ticker
+GET  /api/beta/realized/             # Beta realization data
+GET  /api/beta/forecast-evaluation/  # Forecast performance data
+GET  /api/beta/timeseries/{ticker}/  # Time series for specific ticker
+POST /api/beta/import/               # Import model outputs
+```
+
+#### Query Parameters
+- `ticker`: Filter by stock ticker
+- `start_date`, `end_date`: Date range filtering
+- `min_significance`: Minimum significance threshold
+
+### Database Import
+
+Import beta coefficient model outputs:
+```bash
+# Import from default locations
+python manage.py import_beta_data
+
+# Import from custom files
+python manage.py import_beta_data --betas-file path/to/betas.csv --forecast-file path/to/forecast.csv
+
+# Clear existing data first
+python manage.py import_beta_data --clear-existing
+```
+
+## 🎛️ Features
+
+### Dashboard Components
+
+#### Summary Table
+- **Filtering**: By ticker, confidence level, date range
+- **Sorting**: All columns with visual indicators
+- **Metrics**: Latest predictions, accuracy, R² scores
+- **Actions**: Drill-down to detailed time series
+
+#### Time Series Charts
+- **Predictions vs Actuals**: Visual comparison over time
+- **Confidence Bands**: Statistical uncertainty visualization
+- **Interactive**: Hover tooltips with detailed metrics
+- **Reference Lines**: Market beta (β=1) indicators
+
+#### Statistics Cards
+- **Portfolio Overview**: Total stocks, confidence distribution
+- **Performance**: Average R² scores, forecast counts
+- **Real-time**: Auto-refresh capabilities
+
+### Model Features
+
+#### Statistical Validation
+- **Significance Testing**: P-value thresholds with confidence levels
+- **Model Selection**: AIC-based feature optimization
+- **Cross-validation**: Time series walk-forward validation
+
+#### Risk Management
+- **Confidence Intervals**: 95% prediction bands
+- **Quality Gates**: Statistical significance requirements
+- **Regime Detection**: Market volatility adaptation
+
+## 🛠️ Development
+
+### Project Structure
+```
+├── backend/                 # Django REST API
+│   ├── webapp/             # Main Django app
+│   │   ├── models.py       # Database models
+│   │   ├── serializers.py  # API serializers
+│   │   ├── views.py        # API endpoints
+│   │   └── management/     # Custom commands
+│   └── requirements.txt    # Python dependencies
+├── frontend/               # Next.js application
+│   ├── app/               # App router pages
+│   ├── components/        # React components
+│   │   └── beta/         # Beta-specific components
+│   └── package.json      # Node dependencies
+├── data_analysis/         # Model scripts
+├── outputs/              # Model output files
+├── scripts/             # Automation scripts
+└── docs/               # Documentation
+```
+
+## 📈 Model Integration
+
+### Running Predictions
+```bash
+# Run beta coefficient model
+python data_analysis/bcoefficient_production_level_code_patched.py
+
+# Import results to database
+python manage.py import_beta_data
+
+# Or use the automation script
+python scripts/run_beta_model.py
+```
+
+## 🚢 Deployment
+
+### Production Setup
+
+1. **Database Configuration**
+   ```bash
+   # PostgreSQL setup
+   createdb beta_forecasting
+   python manage.py migrate
+   ```
+
+2. **Static Files**
+   ```bash
+   # Collect Django static files
+   python manage.py collectstatic
+   
+   # Build Next.js application
+   npm run build
+   ```
+
+## 📚 API Documentation
+
+### Beta Analysis
+```bash
+# Summary statistics
+GET /api/beta/summary/
+
+# Time series data
+GET /api/beta/timeseries/AAPL/
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+Built with ❤️ for financial analysis and quantitative research.
 | Charles Benson    | Model/Stats     |
 | Shawna Chandra    | Model/Stats     |
 | Josh Nguyen       | Model/Stats     |

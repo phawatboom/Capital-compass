@@ -23,6 +23,12 @@ from .views import (
     UnifiedAnalysisView,
     UnifiedAnalysisResultView,
     ModelComparisonView,
+    # Beta coefficient model output views
+    BetaRealizedListView,
+    ForecastEvaluationListView,
+    BetaCoefficientSummaryView,
+    BetaCoefficientTimeSeriesView,
+    ImportBetaDataView,
 )
 
 urlpatterns = [
@@ -50,10 +56,17 @@ urlpatterns = [
     # Model analysis
     path('csv-uploads/<int:pk>/analyze/', analyze_upload, name='analyze-upload'),
     
-    # Dual-model architecture endpoints
-    path('api/analysis/unified/', UnifiedAnalysisView.as_view(), name='unified-analysis'),
-    path('api/analysis/<str:ticker>/<str:model_type>/', UnifiedAnalysisResultView.as_view(), name='unified-analysis-result'),
-    path('api/analysis/<str:ticker>/compare/', ModelComparisonView.as_view(), name='model-comparison'),
+    # Unified analysis endpoints
+    path('analysis/unified/', UnifiedAnalysisView.as_view(), name='unified-analysis'),
+    path('analysis/<str:ticker>/<str:model_type>/', UnifiedAnalysisResultView.as_view(), name='unified-analysis-result'),
+    path('analysis/<str:ticker>/compare/', ModelComparisonView.as_view(), name='model-comparison'),
+    
+    # Beta coefficient model output endpoints
+    path('beta/realized/', BetaRealizedListView.as_view(), name='beta-realized-list'),
+    path('beta/forecast-evaluation/', ForecastEvaluationListView.as_view(), name='forecast-evaluation-list'),
+    path('beta/summary/', BetaCoefficientSummaryView.as_view(), name='beta-summary'),
+    path('beta/timeseries/<str:ticker>/', BetaCoefficientTimeSeriesView.as_view(), name='beta-timeseries'),
+    path('beta/import/', ImportBetaDataView.as_view(), name='import-beta-data'),
 ]
 
 if settings.DEBUG:

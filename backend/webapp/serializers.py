@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import Stock, StockData, CSVUploadRecord, UserProfile, BetaForecastResult, MeanReversionResult
+from .models import (
+    Stock, StockData, CSVUploadRecord, UserProfile, 
+    BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation
+)
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -191,4 +194,52 @@ class AnalysisRequestSerializer(serializers.Serializer):
         child=serializers.CharField(max_length=10),
         required=False,
         help_text="Optional list of specific tickers to analyze"
+    )
+
+
+# Beta Coefficient Model Output Serializers
+class BetaRealizedSerializer(serializers.ModelSerializer):
+    """Serializer for beta realized data from betas_20d.csv"""
+    
+    class Meta:
+        model = BetaRealized
+        fields = [
+            'date', 'ticker', 'beta_realised', 'r2_ols_x', 'r2_ols_y',
+            'p_value', 'significance_score', 'beta_pred', 'beta_true',
+            'band', 'lo', 'hi'
+        ]
+
+
+class ForecastEvaluationSerializer(serializers.ModelSerializer):
+    """Serializer for forecast evaluation data from forecast_eval_20d.csv"""
+    
+    class Meta:
+        model = ForecastEvaluation
+        fields = [
+            'date', 'ticker', 'r2_ols', 'p_value', 'significance_score',
+            'beta_pred', 'beta_true', 'band'
+        ]
+
+
+class BetaCoefficientSummarySerializer(serializers.Serializer):
+    """Combined summary serializer for beta coefficient analysis"""
+    
+    ticker = serializers.CharField()
+    latest_date = serializers.DateField()
+    latest_beta_pred = serializers.FloatField()
+    latest_beta_true = serializers.FloatField(allow_null=True)
+    avg_r2_ols = serializers.FloatField()
+    prediction_accuracy = serializers.FloatField()
+    forecast_count = serializers.IntegerField()
+    confidence_level = serializers.CharField()
+
+
+class BetaCoefficientTimeSeriesSerializer(serializers.Serializer):
+    """Time series data for beta coefficient visualization"""
+    
+    dates = serializers.ListField(child=serializers.DateField())
+    beta_pred = serializers.ListField(child=serializers.FloatField())
+    beta_true = serializers.ListField(child=serializers.FloatField(allow_null=True))
+    confidence_bands = serializers.ListField(
+        child=serializers.DictField(child=serializers.FloatField())
     )
