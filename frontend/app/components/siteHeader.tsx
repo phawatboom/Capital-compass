@@ -125,12 +125,12 @@ export default function SiteHeader() {
       <Link href="/uploads" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         My Data
       </Link>
-      <Link href="/dashboard" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
-        Dashboard
-      </Link>
-      <Link href="/reports" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
-        Reports
-      </Link>
+      {/*<Link href="/dashboard" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>*/}
+      {/*  Dashboard*/}
+      {/*</Link>*/}
+      {/*<Link href="/reports" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>*/}
+      {/*  Reports*/}
+      {/*</Link>*/}
       <Link href="/upload" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Upload Data
       </Link>
