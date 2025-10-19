@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, Suspense } from "react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "./authContext";
 
-export default function RequireAuth({ children }: { children: React.ReactNode }) {
+function RequireAuthInner({ children }: { children: React.ReactNode }) {
   const { loading, me } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -28,4 +28,16 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
   if (!me.authenticated) return null;
 
   return <>{children}</>;
+}
+
+export default function RequireAuth({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={
+      <div className="grid min-h-[40vh] place-items-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    }>
+      <RequireAuthInner>{children}</RequireAuthInner>
+    </Suspense>
+  );
 }

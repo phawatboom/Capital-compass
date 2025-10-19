@@ -10,26 +10,26 @@ export default function HomePage() {
       <section className="py-20 px-4">
         <div className="container mx-auto text-center max-w-4xl">
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
-            Smarter Investment Decisions with
-            <span className="text-blue-600"> AI-Powered Analytics</span>
+            Predict Stock Beta Coefficients with
+            <span className="text-blue-600"> Advanced ARIMA Forecasting</span>
           </h1>
           <p className="text-xl text-gray-600 mb-8 leading-relaxed">
-            Transform your stock analysis workflow with advanced metrics like Z-scores, serial correlation, and
-            volatility clustering. Make confident buy/sell decisions backed by transparent, explainable insights.
+            Unlock the future of market sensitivity analysis with our cutting-edge beta coefficient prediction platform. 
+            Combine ARIMA time series modeling with OLS regression to forecast how stocks will respond to market movements.
           </p>
           <p className="text-lg text-blue-600 mb-8">
-            Every score shows uncertainty range so you know how confident the model is.
+            Get precise beta forecasts with confidence intervals and statistical significance testing.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/upload">
+            <Link href="/beta">
               <Button size="lg" className="text-lg px-8 py-3">
-                Upload Your Data
+                View Beta Dashboard
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
-            <Link href="/demo">
+            <Link href="/upload">
               <Button variant="outline" size="lg" className="text-lg px-8 py-3 bg-transparent">
-                View Demo Report
+                Upload Stock Data
               </Button>
             </Link>
           </div>
@@ -39,17 +39,17 @@ export default function HomePage() {
       {/* Value Propositions */}
       <section className="py-16 px-4 bg-white">
         <div className="container mx-auto max-w-6xl">
-          <h2 className="text-3xl font-bold text-center mb-12">Why Capital Compass?</h2>
+          <h2 className="text-3xl font-bold text-center mb-12">Why Beta Coefficient Forecasting?</h2>
           <div className="grid md:grid-cols-3 gap-8">
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <TrendingUp className="h-12 w-12 text-blue-600 mb-4" />
-                <CardTitle>Smarter Decision-Making</CardTitle>
+                <CardTitle>Predictive Market Sensitivity</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Unlock hidden insights and patterns in stock behavior with advanced analytics. Access characteristics
-                  previously unavailable to fill in the missing pieces of market dynamics.
+                  Anticipate how stocks will respond to market movements before they happen. Our ARIMA-based models 
+                  forecast beta coefficients to help you understand future market sensitivity and correlation patterns.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -57,12 +57,12 @@ export default function HomePage() {
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <Upload className="h-12 w-12 text-green-600 mb-4" />
-                <CardTitle>Intuitive & Easy to Use</CardTitle>
+                <CardTitle>Advanced Time Series Modeling</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  One-click file upload, instant analysis. Integrate seamlessly into your workflow with zero training
-                  required. Get the reports you need in seconds, not hours.
+                  Leverages cutting-edge ARIMA forecasting combined with ordinary least squares regression. 
+                  Upload your price data and get sophisticated predictions with statistical confidence intervals.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -70,12 +70,12 @@ export default function HomePage() {
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <Shield className="h-12 w-12 text-purple-600 mb-4" />
-                <CardTitle>Transparent & Traceable</CardTitle>
+                <CardTitle>Statistical Validation</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Every metric traces back to well-recognized financial indicators. Understand exactly what the data
-                  tells you and use insights with confidence.
+                  Every beta prediction comes with R-squared values, p-values, and significance testing. 
+                  Understand model confidence and make data-driven portfolio decisions with statistical rigor.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -86,25 +86,25 @@ export default function HomePage() {
       {/* Key Metrics */}
       <section id="features" className="py-16 px-4 bg-slate-50">
         <div className="container mx-auto max-w-6xl">
-          <h2 className="text-3xl font-bold text-center mb-12">Core Analytics</h2>
+          <h2 className="text-3xl font-bold text-center mb-12">Beta Forecasting Features</h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="font-semibold text-lg mb-2">Z-Score Analysis</h3>
+              <h3 className="font-semibold text-lg mb-2">ARIMA Forecasting</h3>
               <p className="text-gray-600">
-                Identify overbought/oversold conditions with statistical significance and 95% confidence intervals
+                Advanced autoregressive integrated moving average models predict future beta coefficients with precision
               </p>
             </div>
             <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="font-semibold text-lg mb-2">Serial Correlation</h3>
-              <p className="text-gray-600">Detect mean reversion patterns with focus on 30–60 day windows</p>
+              <h3 className="font-semibold text-lg mb-2">OLS Regression</h3>
+              <p className="text-gray-600">Ordinary least squares validation provides R² statistics and significance testing</p>
             </div>
             <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="font-semibold text-lg mb-2">Volatility Clustering</h3>
-              <p className="text-gray-600">Group stocks by risk characteristics with short-term risk window (20d)</p>
+              <h3 className="font-semibold text-lg mb-2">Time Series Analysis</h3>
+              <p className="text-gray-600">Rolling window analysis with 20-day prediction horizons and confidence bands</p>
             </div>
             <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="font-semibold text-lg mb-2">Reversion Signals</h3>
-              <p className="text-gray-600">Numeric score (0–1) with CI range and clear buy/sell/hold recommendations</p>
+              <h3 className="font-semibold text-lg mb-2">Market Sensitivity</h3>
+              <p className="text-gray-600">Predict how individual stocks will correlate with market movements over time</p>
             </div>
           </div>
         </div>
@@ -113,17 +113,17 @@ export default function HomePage() {
       {/* How It Works */}
       <section id="how-it-works" className="py-16 px-4 bg-white">
         <div className="container mx-auto max-w-4xl">
-          <h2 className="text-3xl font-bold text-center mb-12">How It Works</h2>
+          <h2 className="text-3xl font-bold text-center mb-12">How Beta Forecasting Works</h2>
           <div className="space-y-8">
             <div className="flex items-start space-x-4">
               <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
                 1
               </div>
               <div>
-                <h3 className="font-semibold text-lg mb-2">Upload Your Data</h3>
+                <h3 className="font-semibold text-lg mb-2">Upload Historical Price Data</h3>
                 <p className="text-gray-600">
-                  Upload CSV files with your stock price data (headers: date, ticker, adj_close/ret). Our system
-                  automatically detects the format and structure.
+                  Upload CSV files with stock price history including dates, tickers, and adjusted closing prices. 
+                  Our system automatically processes the data for time series analysis.
                 </p>
               </div>
             </div>
@@ -132,10 +132,10 @@ export default function HomePage() {
                 2
               </div>
               <div>
-                <h3 className="font-semibold text-lg mb-2">AI Analysis</h3>
+                <h3 className="font-semibold text-lg mb-2">ARIMA Model Forecasting</h3>
                 <p className="text-gray-600">
-                  Our models calculate Z-scores, correlations, volatility metrics, and cluster memberships for each
-                  stock, with confidence intervals for all metrics.
+                  Our advanced ARIMA models analyze historical beta patterns and generate forward-looking predictions. 
+                  Combined with OLS regression for validation and statistical significance testing.
                 </p>
               </div>
             </div>
@@ -144,10 +144,10 @@ export default function HomePage() {
                 3
               </div>
               <div>
-                <h3 className="font-semibold text-lg mb-2">Get Actionable Reports</h3>
+                <h3 className="font-semibold text-lg mb-2">Interactive Beta Dashboard</h3>
                 <p className="text-gray-600">
-                  Receive detailed reports with buy/sell/hold recommendations, one page per stock, with clear rationale
-                  and confidence intervals.
+                  Access real-time beta coefficient forecasts with confidence intervals, prediction accuracy metrics, 
+                  and time series visualizations to guide your investment decisions.
                 </p>
               </div>
             </div>
@@ -158,13 +158,13 @@ export default function HomePage() {
       {/* CTA Section */}
       <section className="py-16 px-4 bg-blue-600 text-white">
         <div className="container mx-auto text-center max-w-3xl">
-          <h2 className="text-3xl font-bold mb-6">Ready to Transform Your Investment Process?</h2>
+          <h2 className="text-3xl font-bold mb-6">Ready to Predict Market Sensitivity?</h2>
           <p className="text-xl mb-8 opacity-90">
-            Join fund managers who are already making smarter decisions with Capital Compass.
+            Join quantitative analysts who are leveraging advanced beta forecasting for superior portfolio management.
           </p>
-          <Link href="/upload">
+          <Link href="/beta">
             <Button size="lg" variant="secondary" className="text-lg px-8 py-3">
-              Start Your Analysis
+              Explore Beta Dashboard
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
           </Link>
@@ -178,21 +178,21 @@ export default function HomePage() {
             <div>
               <div className="flex items-center space-x-2 mb-4">
                 <BarChart3 className="h-6 w-6" />
-                <span className="text-xl font-bold">Capital Compass</span>
+                <span className="text-xl font-bold">Beta Forecasting Platform</span>
               </div>
-              <p className="text-gray-400">AI-powered investment analytics for smarter decision-making.</p>
+              <p className="text-gray-400">Advanced ARIMA modeling for beta coefficient prediction and portfolio optimization.</p>
             </div>
             <div>
-              <h3 className="font-semibold mb-4">Product</h3>
+              <h3 className="font-semibold mb-4">Platform</h3>
               <ul className="space-y-2 text-gray-400">
                 <li>
-                  <Link href="/upload" className="hover:text-white">
-                    Upload Data
+                  <Link href="/beta" className="hover:text-white">
+                    Beta Dashboard
                   </Link>
                 </li>
                 <li>
-                  <Link href="/demo" className="hover:text-white">
-                    Demo
+                  <Link href="/upload" className="hover:text-white">
+                    Upload Data
                   </Link>
                 </li>
                 <li>
@@ -223,28 +223,28 @@ export default function HomePage() {
               </ul>
             </div>
             <div>
-              <h3 className="font-semibold mb-4">Support</h3>
+              <h3 className="font-semibold mb-4">Resources</h3>
               <ul className="space-y-2 text-gray-400">
                 <li>
-                  <Link href="/docs" className="hover:text-white">
-                    Documentation
+                  <Link href="/stocks" className="hover:text-white">
+                    Stock Analysis
                   </Link>
                 </li>
                 <li>
-                  <Link href="/help" className="hover:text-white">
-                    Help Center
+                  <Link href="/dashboard" className="hover:text-white">
+                    Analytics Dashboard
                   </Link>
                 </li>
                 <li>
-                  <Link href="/api" className="hover:text-white">
-                    API
+                  <Link href="#how-it-works" className="hover:text-white">
+                    How It Works
                   </Link>
                 </li>
               </ul>
             </div>
           </div>
           <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2025 Capital Compass. All rights reserved.</p>
+            <p>&copy; 2025 Beta Forecasting Platform. Developed by Team Bobbers.</p>
           </div>
         </div>
       </footer>

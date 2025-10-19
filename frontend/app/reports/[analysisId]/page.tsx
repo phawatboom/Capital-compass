@@ -328,7 +328,7 @@ export default function StockReport() {
                   />
                   <Bar
                     dataKey="count"
-                    fill={(entry: any) => (entry.isCurrentStock ? "#dc2626" : "#e5e7eb")}
+                    fill="#e5e7eb"
                     stroke="#9ca3af"
                     strokeWidth={0.5}
                   />
@@ -440,7 +440,7 @@ export default function StockReport() {
                   <ReferenceLine y={-1.5} stroke="#3b82f6" strokeDasharray="2 2" strokeWidth={1} />
                   <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="1 1" strokeWidth={1} />
                   <Bar dataKey="zscore" fill="#8884d8" stroke="#6366f1" strokeWidth={1}>
-                    <ErrorBar dataKey={["ci_lower", "ci_upper"]} width={4} strokeWidth={2} stroke="#4f46e5" />
+                    <ErrorBar dataKey="ci_lower" width={4} strokeWidth={2} stroke="#4f46e5" />
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>

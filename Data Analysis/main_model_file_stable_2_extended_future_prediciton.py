@@ -458,7 +458,7 @@ def build_feature_panel(returns_wide: pd.DataFrame, cfg: Config, logger: logging
 
     logger.info(
         f"Panel: {panel.shape[0]:,} rows × {panel.shape[1]} cols  "
-        f"({panel['Date'].min().date()} → {panel['Date'].max().date()})"
+        f"({panel['Date'].min().date()} to {panel['Date'].max().date()})"
     )
     return panel
 
@@ -713,9 +713,13 @@ def run_one_horizon(panel: pd.DataFrame, horizon_name: str, cfg: Config, model_n
                         from sklearn.metrics import f1_score as _f1
                         f1s.append(float(_f1(yv[mask], yp[mask], zero_division=0)))
             if cfg.min_coverage is not None and f1s:
-                score = np.nanmean(aucs)*0.5 + np.nanmean(f1s)*0.5
+                auc_score = np.nanmean(aucs) if aucs else 0.0
+                f1_score = np.nanmean(f1s) if f1s else 0.0
+                score = auc_score * 0.5 + f1_score * 0.5
             else:
-                score = np.nanmean(aucs)*0.3 + np.nanmean(prs)*0.7
+                auc_score = np.nanmean(aucs) if aucs else 0.0
+                pr_score = np.nanmean(prs) if prs else 0.0
+                score = auc_score * 0.3 + pr_score * 0.7
             return score, params
 
         candidates = list(iter_param_grid(model_name))
@@ -1106,7 +1110,7 @@ def forecast_one_horizon(
     cfg: Config,
     model_name: str,
     logger: logging.Logger
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict[str, str]]:
     """Train on most-recent window; produce calibrated probs, exp_move, bands for the latest date."""
     label_col = f"label_mr_{horizon_name}"
     feat_cols = [c for c in train_panel.columns if c not in ("Date","ticker","daily_vol") and not c.startswith("fwd_") and not c.startswith("mom_") and not c.startswith("label_")]
@@ -1114,7 +1118,7 @@ def forecast_one_horizon(
     df_tr = train_panel.dropna(subset=[label_col]).copy()
     if len(df_tr) < 100 or df_tr[label_col].nunique() < 2:
         logger.warning(f"[{horizon_name}] Skipping: insufficient training data.")
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
 
     X_tr, y_tr, dates_tr = df_tr[feat_cols].values, df_tr[label_col].astype(int).values, df_tr["Date"].to_numpy()
     h_days, k_days = next((h, k) for n,h,k in cfg.horizons if n==horizon_name)
@@ -1128,6 +1132,12 @@ def forecast_one_horizon(
     def evaluate_params(params):
         aucs, prs = [], []
         for tr_i, va_i in purged_inner_splits(dates_tr, cfg.inner_cv_folds, purge_days=h_days):
+            # Skip if validation fold has insufficient data
+            if len(va_i) == 0 or len(tr_i) == 0:
+                continue
+            if len(np.unique(y_tr[va_i])) < 2:  # Single class in validation
+                continue
+                
             mdl = build_model(model_name, params, cfg)
             mdl.fit(X_tr[tr_i], y_tr[tr_i])
             pro = mdl.predict_proba(X_tr[va_i])[:, 1]
@@ -1136,6 +1146,11 @@ def forecast_one_horizon(
                 prs.append(float(average_precision_score(y_tr[va_i], pro)))
             except Exception:
                 prs.append(0.0)
+        
+        # Guard against empty metric lists
+        if not aucs or not prs:
+            return -float("inf"), params
+            
         score = np.nanmean(aucs) * 0.3 + np.nanmean(prs) * 0.7
         return score, params
 
@@ -1145,14 +1160,18 @@ def forecast_one_horizon(
         try:
             scored = Parallel(n_jobs=cfg.n_jobs, prefer="threads")(delayed(evaluate_params)(p) for p in candidates)
             if scored:
-                _, best_params = max(scored, key=lambda t: (t[0], ))
-                logger.info(f"[{horizon_name}] Best params: {best_params}")
+                valid_scores = [(score, params) for score, params in scored if score > -float("inf")]
+                if valid_scores:
+                    _, best_params = max(valid_scores, key=lambda t: t[0])
+                    logger.info(f"[{horizon_name}] Best params: {best_params}")
         except Exception as e:
             logger.warning(f"[{horizon_name}] Param search failed, using default. Error: {e}")
 
     # OOS probs for train slice → isotonic
     oos_prob = np.full(y_tr.shape[0], np.nan, dtype=float)
     for tr_i, va_i in purged_inner_splits(dates_tr, cfg.inner_cv_folds, purge_days=h_days):
+        if len(va_i) == 0 or len(tr_i) == 0:
+            continue
         mdl = build_model(model_name, best_params, cfg)
         mdl.fit(X_tr[tr_i], y_tr[tr_i])
         oos_prob[va_i] = mdl.predict_proba(X_tr[va_i])[:, 1]
@@ -1207,7 +1226,6 @@ def forecast_one_horizon(
     high_move = p_cal * (-mom_fc_sign) * (pred_mr_abs + q_mr) + (1.0 - p_cal) * (mom_fc_sign) * (pred_mo_abs + q_mo)
 
     # Optional: decisions in forecast (if user provides coverage/threshold)
-
     threshold_used = np.nan
     y_pred = np.full(p_cal.shape[0], ABSTAIN, dtype=int)
     abstained = np.ones(p_cal.shape[0], dtype=bool)
@@ -1237,27 +1255,49 @@ def forecast_one_horizon(
         y_pred[lo] = 0
         abstained = ~(hi | lo)
 
-    # Create the dictionary for the standard prediction output
+    # Create the dictionary for the standard prediction output with consistent column names
     output_data = {
-        "forecast_date": forecast_panel["Date"].values,
+        "date": forecast_panel["Date"].values,
         "ticker": tickers_fc,
-        "horizon": horizon_name,
-        "y_prob": p_raw,
-        "y_prob_cal": p_cal,
+        "horizon": horizon_name,  # Use "horizon" instead of "Forecast Horizon"
+        "raw_probability": p_raw,
+        "calibrated_probability": p_cal,
         "confidence": np.maximum(p_cal, 1.0 - p_cal),
-        "exp_move": exp_move,
-        "pi_low": low_move,
-        "pi_high": high_move,
-        "mom_sign": mom_fc_sign,
-        "threshold": threshold_used,
-        "y_pred": y_pred,
+        "expected_move": exp_move,
+        "prediction_interval_low": low_move,
+        "prediction_interval_high": high_move,
+        "momentum_sign": mom_fc_sign,
+        "decision_threshold": threshold_used,
+        "prediction": y_pred,
         "abstained": abstained,
     }
+    
     # Extract the feature values from the forecast panel and add them to the output
     feature_values = forecast_panel[feat_cols].reset_index(drop=True)
     final_output_df = pd.concat([pd.DataFrame(output_data), feature_values], axis=1)
+
+    # Create descriptions for the output columns
+    descriptions = {
+        "date": "The date for which the forecast is made.",
+        "ticker": "The stock ticker symbol.",
+        "horizon": "The time period for the forecast (e.g., d1 for 1 day).",
+        "raw_probability": "The raw probability output from the model before calibration.",
+        "calibrated_probability": "The model's probability output after calibration, representing the likelihood of an upward movement.",
+        "confidence": "The model's confidence in its prediction, calculated as max(p, 1-p).",
+        "expected_move": "The expected percentage change in price.",
+        "prediction_interval_low": "The lower bound of the prediction interval for the price move.",
+        "prediction_interval_high": "The upper bound of the prediction interval for the price move.",
+        "momentum_sign": "The sign of the momentum feature, indicating recent price trends.",
+        "decision_threshold": "The probability threshold used to make a buy (1) or sell (0) decision.",
+        "prediction": "The final forecast: 1 for an expected upward move, 0 for a downward move.",
+        "abstained": "Indicates if the model abstained from making a prediction (True/False).",
+    }
     
-    return final_output_df
+    # Add descriptions for feature columns
+    for col in feature_values.columns:
+        descriptions[col] = f"Value of the '{col}' feature used in the model."
+
+    return final_output_df, descriptions
 
 
 def run_forecast(cfg: Config, model_name: str) -> None:
@@ -1299,7 +1339,7 @@ def run_forecast(cfg: Config, model_name: str) -> None:
     last_feature_date = panel["Date"].max()
     logger.info(f"Most recent feature date: {last_feature_date.date()}")
     train_start_date = last_feature_date - pd.DateOffset(years=cfg.train_years)
-    logger.info(f"Training window: {train_start_date.date()} → {last_feature_date.date()}")
+    logger.info(f"Training window: {train_start_date.date()} to {last_feature_date.date()}")
 
     all_fc = []
     for name, h_days, _ in cfg.horizons:
@@ -1311,12 +1351,35 @@ def run_forecast(cfg: Config, model_name: str) -> None:
         if train_panel.empty or forecast_panel.empty:
             logger.warning(f"[Forecast] Skipping {name}: insufficient rows for train/forecast.")
             continue
-        df_fc = forecast_one_horizon(train_panel, forecast_panel, name, cfg, model_name, logger)
-        if not df_fc.empty:
+            
+        # Properly unpack the tuple return
+        df_fc, descriptions = forecast_one_horizon(train_panel, forecast_panel, name, cfg, model_name, logger)
+        
+        # Only append if we got a valid DataFrame
+        if isinstance(df_fc, pd.DataFrame) and not df_fc.empty:
+            # Ensure required columns exist
+            if "horizon" not in df_fc.columns:
+                df_fc["horizon"] = name
+            if "ticker" not in df_fc.columns and "Ticker" in df_fc.columns:
+                df_fc = df_fc.rename(columns={"Ticker": "ticker"})
             all_fc.append(df_fc)
 
     if not all_fc:
         logger.error("No forecasts produced for any horizon.")
+        return
+
+    # Verify all DataFrames have required columns before concatenation
+    required_cols = {"horizon", "ticker"}
+    bad_frames = []
+    for i, df in enumerate(all_fc):
+        if not isinstance(df, pd.DataFrame):
+            bad_frames.append(f"Index {i}: not a DataFrame")
+        elif not required_cols.issubset(df.columns):
+            missing = required_cols - set(df.columns)
+            bad_frames.append(f"Index {i}: missing columns {missing}")
+    
+    if bad_frames:
+        logger.error(f"Invalid forecast frames: {bad_frames}")
         return
 
     final_fc = pd.concat(all_fc, ignore_index=True).sort_values(["horizon", "ticker"])
@@ -1348,6 +1411,7 @@ def run_forecast(cfg: Config, model_name: str) -> None:
         json.dump(meta, fh, indent=2, default=str)
     logger.info("Forecast complete. Artifacts: forecast_YYYYMMDD.csv, run_meta_forecast.json")
 
+
 # =========================
 # Entry
 # =========================
@@ -1363,7 +1427,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train_years", type=int, default=3, help="Outer train years (default: 3)")
     p.add_argument("--val_years", type=int, default=1, help="Outer validation years (default: 1)")
     p.add_argument("--embargo", type=int, default=5, help="Embargo days after validation start (default: 5)")
-    p.add_argument("--random_state", type=int, default=42, help="Random seed (default: 42)")
+    p.add_argument("--random_state", type=int, default=42, help="Random seed (default:  42)")
     p.add_argument("--n_jobs", type=int, default=-1, help="Parallel jobs for param scoring (default: -1)")
     p.add_argument("--min_valid_frac", type=float, default=0.70, help="Minimum non-NaN fraction per ticker (default: 0.70)")
     # Market options

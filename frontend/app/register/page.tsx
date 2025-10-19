@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/app/lib/authContext";
 import api from "@/app/lib/api";
@@ -28,7 +28,7 @@ function scorePassword(pw: string) {
   return Math.min(s, 5);
 }
 
-export default function RegisterPage() {
+function RegisterPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const nextParam = search.get("next") || "/";
@@ -254,5 +254,17 @@ export default function RegisterPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={
+      <div className="grid min-h-[40vh] place-items-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    }>
+      <RegisterPageInner />
+    </Suspense>
   );
 }
