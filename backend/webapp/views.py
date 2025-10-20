@@ -406,38 +406,32 @@ def process_data(df, file, data_type, upload_record):
 # --------------------------------------------------------------------------------------
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]  # ensure user is logged in
 
     def post(self, request, *args, **kwargs):
         file_obj = request.data.get('file')
-
         if not file_obj:
             return Response({'error': 'No file was provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Associate upload with the current logged-in user
         serializer = CSVUploadSerializer(data={'filename': file_obj})
         if serializer.is_valid():
             upload_record = None
             try:
-                upload_record = serializer.save()
+                upload_record = serializer.save(user=request.user)  # <-- FIX: set the user
                 file_path = upload_record.filename.path
-                # Handle XLSX files with multiple sheets
+
+                # Optional: process XLSX or CSV files as before
                 if file_path.endswith('.xlsx'):
-                    sheets_to_process = {
-                        'Prices': 'price',
-                        'Returns': 'return',
-                    }
+                    sheets_to_process = {'Prices': 'price', 'Returns': 'return'}
                     with pd.ExcelFile(file_path) as xls:
-                        print(f"Available sheets: {xls.sheet_names}")  # Add this debug line
                         for sheet_name, data_type in sheets_to_process.items():
                             if sheet_name in xls.sheet_names:
-                                print(f"Processing sheet: {sheet_name}")  # Add this debug line
                                 df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
                                 process_data(df, file_obj, data_type, upload_record)
 
-                # Handle CSV files
                 elif file_path.endswith('.csv'):
                     df = pd.read_csv(file_path, header=None)
-
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
@@ -457,11 +451,11 @@ class FileUploadView(APIView):
                                 status=status.HTTP_201_CREATED)
 
             except Exception as e:
+                # Cleanup if processing fails
                 if upload_record:
                     if os.path.exists(upload_record.filename.path):
                         os.remove(upload_record.filename.path)
                     upload_record.delete()
-
                 return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         else:
