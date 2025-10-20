@@ -68,6 +68,3 @@ urlpatterns = [
     path('beta/timeseries/<str:ticker>/', BetaCoefficientTimeSeriesView.as_view(), name='beta-timeseries'),
     path('beta/import/', ImportBetaDataView.as_view(), name='import-beta-data'),
 ]
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
