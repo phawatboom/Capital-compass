@@ -435,9 +435,9 @@ class FileUploadView(APIView):
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'returns' in file_obj.name.lower():
+                    elif 'returns' or 'mxus_data' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'bql_query' in file_obj.name.lower():
+                    elif 'bql_query' or 'equity' in file_obj.name.lower():
                         data_type = 'equity'
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
@@ -745,10 +745,10 @@ def analyze_upload(request, pk: int):
         logger.warning(f"Analysis failed: Upload pk={pk} not found for user={request.user.username}")
         return Response({"error": "Upload not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    # 2. Define paths robustly
+    # 2. Define paths
     project_root = Path(settings.BASE_DIR).parent
     script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
-    
+
     if not script_path.exists():
         logger.error(f"Model script not found at {script_path}")
         return Response({"error": "Model script not found on server."}, status=500)
@@ -756,29 +756,32 @@ def analyze_upload(request, pk: int):
     out_dir = Path(settings.MEDIA_ROOT) / "analysis_results" / str(pk)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 3. Run the model script SAFELY
+    # 3. Determine file type argument — unified handling for CSV and Excel
+    file_ext = rec.filename.path.split('.')[-1].lower()
+    if file_ext not in ["csv", "xls", "xlsx"]:
+        logger.error(f"Unsupported file type for analysis: {rec.filename.path}")
+        return Response({"error": "Unsupported file type. Only CSV or Excel are allowed."}, status=400)
+
+    # 4. Run the model script (always uses --file)
     cmd = [
         sys.executable,
         str(script_path),
         "--mode", "forecast",
-        "--excel", rec.filename.path,
+        "--file", rec.filename.path,   # ✅ unified argument for CSV/Excel
         "--out", str(out_dir),
     ]
     logger.info(f"Running command: {' '.join(cmd)}")
 
     try:
-        # Using check=True will automatically raise CalledProcessError on failure
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
-    
     except subprocess.CalledProcessError as e:
-        # This block runs if the script executes but returns a non-zero (error) exit code
         logger.error(f"Model script failed for pk={pk}. Stderr: {e.stderr}")
         return Response(
             {
                 "error": "Model script failed to execute.",
                 "details": "The analysis script encountered an error.",
-                "stdout": e.stdout[-2000:], # Last 2000 characters of standard output
-                "stderr": e.stderr[-2000:], # Last 2000 characters of standard error
+                "stdout": e.stdout[-2000:],
+                "stderr": e.stderr[-2000:],
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -789,19 +792,16 @@ def analyze_upload(request, pk: int):
         logger.warning(f"Analysis for pk={pk} timed out.")
         return Response({"error": "Analysis timed out after 10 minutes."}, status=500)
     except Exception as e:
-        # Catch any other unexpected errors during the subprocess call
         logger.exception(f"An unexpected error occurred while running the model for pk={pk}")
         return Response({"error": "An unexpected error occurred during analysis.", "detail": str(e)}, status=500)
 
-    # 4. Find the generated output file
-    logger.info(f"Model run successful for pk={pk}. Searching for output file in {out_dir}")
+    # 5. Find the generated output file
     try:
         latest_file = sorted(out_dir.glob("forecast_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[0]
     except IndexError:
         logger.error(f"Model ran, but no output file was found in {out_dir}")
         return Response({"error": "Model ran, but no output file was generated."}, status=500)
 
-    # 5. Return the file for download
     logger.info(f"Returning file {latest_file.name} for download.")
     return FileResponse(open(latest_file, "rb"), as_attachment=True, filename=latest_file.name)
 
