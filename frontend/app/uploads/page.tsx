@@ -81,7 +81,7 @@ function getCsrfToken(): string | null {
 }
 
 export default function UploadsPage() {
-  const [analyzing, setAnalyzing] = useState(false); // State for the "Analyze" button
+  const [analyzingId, setAnalyzingId] = useState<number | null>(null);// State for the "Analyze" button
   const [results, setResults] = useState([]); // State for storing analysis results
   // Data
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
@@ -208,58 +208,48 @@ export default function UploadsPage() {
     if (kind === "day") setDayFilter(null);
   };
 
-  const handleAnalyze = async (uploadId: number) => {
-      // Use the 'analyzing' state you already created for this button
-      setAnalyzing(true); 
+    const handleAnalyze = async (uploadId: number) => {
+      setAnalyzingId(uploadId);
       setError(null);
-      // You can optionally clear previous results here if you were displaying them
-      // setResults([]); 
-
       try {
-        // Use the existing helper function to get the token.
-        // This function also fetches the cookie if it's missing.
         const token = await ensureCsrf();
-
         const response = await fetch(`${API_BASE}/csv-uploads/${uploadId}/analyze/`, {
-          method: 'POST',
-          credentials: 'include',
+          method: "POST",
+          credentials: "include",
           headers: {
             "X-CSRFToken": token,
-            "Content-Type": "application/json", // Good practice to include
-        },
+            "Content-Type": "application/json",
+          },
         });
 
-        // This block handles HTTP errors from the backend (like 404 or 500)
         if (!response.ok) {
-          // Try to parse the error message from the backend's JSON response
           const errorData = await response.json().catch(() => null);
-          const errorMessage = errorData?.error || errorData?.details || `Analysis failed with status: ${response.status}`;
+          const errorMessage =
+            errorData?.error ||
+            errorData?.details ||
+            `Analysis failed with status: ${response.status}`;
           throw new Error(errorMessage);
         }
 
-        // This block handles a successful response (the file download)
-        const disposition = response.headers.get('Content-Disposition');
-        let filename = 'forecast.csv';
-        if (disposition && disposition.includes('filename=')) {
-          filename = disposition.split('filename=')[1].replace(/"/g, '');
+        const disposition = response.headers.get("Content-Disposition");
+        let filename = "forecast.csv";
+        if (disposition && disposition.includes("filename=")) {
+          filename = disposition.split("filename=")[1].replace(/"/g, "");
         }
 
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
+        const a = document.createElement("a");
         a.href = url;
         a.download = filename;
         document.body.appendChild(a);
         a.click();
         a.remove();
         window.URL.revokeObjectURL(url);
-
       } catch (err: any) {
-        // This 'catch' block handles network errors or the error thrown above
-        setError(err.message || 'An unknown error occurred.');
+        setError(err.message || "An unknown error occurred.");
       } finally {
-        // Use the 'analyzing' state here as well
-        setAnalyzing(false);
+        setAnalyzingId(null); // reset only after finishing
       }
     };
 
@@ -712,10 +702,10 @@ export default function UploadsPage() {
                               variant="outline"
                               className="h-8 px-2"
                               onClick={() => handleAnalyze(u.id)}
-                              disabled={analyzing}
+                              disabled={analyzingId === u.id}
                               title="Analyze"
                             >
-                              {analyzing ? 'Analyzing...' : 'Analyze'}
+                              {analyzingId === u.id ? "Analyzing..." : "Analyze"}
                             </Button>
                             <Button
                               type="button"
