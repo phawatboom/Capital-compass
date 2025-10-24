@@ -38,7 +38,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
 
     // Apply search filter
     if (searchTicker) {
-      filtered = filtered.filter(item => 
+      filtered = filtered.filter(item =>
         item.ticker.toLowerCase().includes(searchTicker.toLowerCase())
       );
     }
@@ -52,10 +52,10 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
     filtered.sort((a, b) => {
       const aVal = a[sortField];
       const bVal = b[sortField];
-      
+
       if (aVal === null || aVal === undefined) return 1;
       if (bVal === null || bVal === undefined) return -1;
-      
+
       if (sortOrder === 'asc') {
         return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
       } else {
@@ -86,11 +86,11 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
 
   const getBetaTrendIcon = (betaPred: number, betaTrue: number | null) => {
     if (betaTrue === null) return <Minus className="h-4 w-4 text-gray-400" />;
-    
+
     const diff = betaPred - betaTrue;
     if (Math.abs(diff) < 0.05) return <Minus className="h-4 w-4 text-gray-500" />;
-    
-    return diff > 0 
+
+    return diff > 0
       ? <TrendingUp className="h-4 w-4 text-green-600" />
       : <TrendingDown className="h-4 w-4 text-red-600" />;
   };
@@ -162,71 +162,148 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
         </div>
 
         {/* Table */}
-        <div className="rounded-md border overflow-hidden">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead 
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => handleSort('ticker')}
-                >
+                <TableHead onClick={() => handleSort('ticker')} className="cursor-pointer hover:bg-gray-50">
                   Ticker {sortField === 'ticker' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
-                <TableHead 
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => handleSort('latest_date')}
-                >
-                  Latest Date {sortField === 'latest_date' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <TableHead onClick={() => handleSort('created_at')} className="cursor-pointer hover:bg-gray-50">
+                  Created At {sortField === 'created_at' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
-                <TableHead 
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => handleSort('latest_beta_pred')}
-                >
-                  Beta Pred {sortField === 'latest_beta_pred' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <TableHead onClick={() => handleSort('b_coefficient')} className="cursor-pointer hover:bg-gray-50">
+                  β Coefficient {sortField === 'b_coefficient' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
-                <TableHead>Beta True</TableHead>
                 <TableHead>Trend</TableHead>
-                <TableHead 
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => handleSort('avg_r2_ols')}
-                >
-                  Avg R² {sortField === 'avg_r2_ols' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <TableHead onClick={() => handleSort('y_intercept')} className="cursor-pointer hover:bg-gray-50">
+                  Y-Intercept {sortField === 'y_intercept' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
-                <TableHead>Accuracy</TableHead>
-                <TableHead>Confidence</TableHead>
-                <TableHead 
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => handleSort('forecast_count')}
-                >
-                  Forecasts {sortField === 'forecast_count' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <TableHead onClick={() => handleSort('volatility')} className="cursor-pointer hover:bg-gray-50">
+                  Volatility {sortField === 'volatility' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
+
+                {/* Core factors */}
+                <TableHead onClick={() => handleSort('train_b')} className="cursor-pointer hover:bg-gray-50">
+                  Train β {sortField === 'train_b' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('lag_train_b')} className="cursor-pointer hover:bg-gray-50">
+                  Lag Train β {sortField === 'lag_train_b' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
+                {/* AR(1) */}
+                <TableHead onClick={() => handleSort('ar1_corr_10d')} className="cursor-pointer hover:bg-gray-50">
+                  AR(1) Corr 10d {sortField === 'ar1_corr_10d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('ar1_corr_20d')} className="cursor-pointer hover:bg-gray-50">
+                  AR(1) Corr 20d {sortField === 'ar1_corr_20d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('ar1_corr_60d')} className="cursor-pointer hover:bg-gray-50">
+                  AR(1) Corr 60d {sortField === 'ar1_corr_60d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
+                {/* Sign persistence */}
+                <TableHead onClick={() => handleSort('sign_persist_20d')} className="cursor-pointer hover:bg-gray-50">
+                  Sign Persist 20d {sortField === 'sign_persist_20d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('sign_persist_60d')} className="cursor-pointer hover:bg-gray-50">
+                  Sign Persist 60d {sortField === 'sign_persist_60d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
+                {/* Returns */}
+                <TableHead onClick={() => handleSort('ret_1d')} className="cursor-pointer hover:bg-gray-50">
+                  Return 1d {sortField === 'ret_1d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('ret_5d')} className="cursor-pointer hover:bg-gray-50">
+                  Return 5d {sortField === 'ret_5d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('ret_20d')} className="cursor-pointer hover:bg-gray-50">
+                  Return 20d {sortField === 'ret_20d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
+                {/* Volatilities */}
+                <TableHead onClick={() => handleSort('vol_63d')} className="cursor-pointer hover:bg-gray-50">
+                  Vol 63d {sortField === 'vol_63d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('vol_126d')} className="cursor-pointer hover:bg-gray-50">
+                  Vol 126d {sortField === 'vol_126d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('vol_252d')} className="cursor-pointer hover:bg-gray-50">
+                  Vol 252d {sortField === 'vol_252d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('vol_756d')} className="cursor-pointer hover:bg-gray-50">
+                  Vol 756d {sortField === 'vol_756d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
+                {/* Z score of MA */}
+                <TableHead onClick={() => handleSort('Z_ma_20d')} className="cursor-pointer hover:bg-gray-50">
+                  Z-MA 20d {sortField === 'Z_ma_20d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
+                {/* Cross-sectional ranks */}
+                <TableHead onClick={() => handleSort('cs_rank_ret_1d')} className="cursor-pointer hover:bg-gray-50">
+                  Rank Return 1d {sortField === 'cs_rank_ret_1d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('cs_rank_ret_5d')} className="cursor-pointer hover:bg-gray-50">
+                  Rank Return 5d {sortField === 'cs_rank_ret_5d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('cs_rank_ret_20d')} className="cursor-pointer hover:bg-gray-50">
+                  Rank Return 20d {sortField === 'cs_rank_ret_20d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
+
             <TableBody>
               {filteredData.map((item) => (
                 <TableRow key={item.ticker}>
                   <TableCell className="font-medium">{item.ticker}</TableCell>
-                  <TableCell>{new Date(item.latest_date).toLocaleDateString()}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.latest_beta_pred)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.latest_beta_true)}</TableCell>
+                  <TableCell>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.b_coefficient)}</TableCell>
+
+                  {/* Trend Icon using Lucide */}
                   <TableCell>
-                    {getBetaTrendIcon(item.latest_beta_pred, item.latest_beta_true)}
+                    {item.b_coefficient === null || item.b_coefficient === 0 ? (
+                      <Minus className="h-4 w-4 text-gray-400" />
+                    ) : item.b_coefficient > 0 ? (
+                      <TrendingUp className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <TrendingDown className="h-4 w-4 text-red-600" />
+                    )}
                   </TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.avg_r2_ols)}</TableCell>
-                  <TableCell>{formatAccuracy(item.prediction_accuracy)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.y_intercept)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.volatility)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.train_b)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.lag_train_b)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.ar1_corr_10d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.ar1_corr_20d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.ar1_corr_60d)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.sign_persist_20d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.sign_persist_60d)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.ret_1d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.ret_5d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.ret_20d)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.vol_63d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.vol_126d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.vol_252d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.vol_756d)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.Z_ma_20d)}</TableCell>
+
+                  <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_1d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_5d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_20d)}</TableCell>
+
                   <TableCell>
-                    <Badge variant={getConfidenceBadgeVariant(item.confidence_level)}>
-                      {item.confidence_level}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{item.forecast_count}</TableCell>
-                  <TableCell>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => onTickerSelect?.(item.ticker)}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
                       Details
                     </Button>
                   </TableCell>

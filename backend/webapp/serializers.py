@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Stock, StockData, CSVUploadRecord, UserProfile, 
-    BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation
+    BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation, StockFactorResult, FactorSharedStats
 )
 from django.contrib.auth import get_user_model
 
@@ -243,3 +243,42 @@ class BetaCoefficientTimeSeriesSerializer(serializers.Serializer):
     confidence_bands = serializers.ListField(
         child=serializers.DictField(child=serializers.FloatField())
     )
+
+
+class FactorSharedStatsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FactorSharedStats
+        fields = "__all__"
+
+
+class StockFactorResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockFactorResult
+        fields = [
+            "id", "ticker", "b_coefficient", "y_intercept", "volatility",
+            "train_b", "lag_train_b", "ar1_corr_10d", "ar1_corr_20d", "ar1_corr_60d",
+            "sign_persist_20d", "sign_persist_60d", "ret_1d", "ret_5d", "ret_20d",
+            "vol_63d", "vol_126d", "vol_252d", "vol_756d", "Z_ma_20d",
+            "cs_rank_ret_1d", "cs_rank_ret_5d", "cs_rank_ret_20d", "cs_rank_ret_20d",
+            "created_at", "shared_stats_id"
+        ]
+
+
+class StockFactorTimeSeriesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockFactorResult
+        fields = [
+            "created_at",
+            "b_coefficient",
+            "volatility",
+            "train_b",
+            "lag_train_b",
+            "ret_1d",
+            "ret_5d",
+            "ret_20d",
+            "vol_63d",
+            "vol_126d",
+            "vol_252d",
+            "vol_756d",
+            "Z_ma_20d",
+        ]
