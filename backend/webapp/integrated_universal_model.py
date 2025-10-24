@@ -22,10 +22,12 @@ class IntegratedUniversalBetaModel:
     Integrates data processing, model training, and prediction generation
     """
     
-    def __init__(self, output_dir=None):
+    def __init__(self, output_dir=None, alpha=0.01, l1_ratio=0.5):
         self.output_dir = output_dir or "client_outputs"
         self.scaler = StandardScaler()
-        self.model = ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42)
+        self.model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
+        self.alpha = alpha
+        self.l1_ratio = l1_ratio
         self.feature_columns = [
             'train_b', 'lag_train_b', 'ar1_corr_10d', 'ar1_corr_20d', 'ar1_corr_60d',
             'sign_persist_20d', 'sign_persist_60d', 'ret_1d', 'ret_5d', 'ret_20d',
@@ -35,10 +37,11 @@ class IntegratedUniversalBetaModel:
             'xsec_disp_30d'
         ]
     
-    def process_uploaded_data(self, csv_file_path):
+    def process_uploaded_data(self, csv_file_path, sector_filter='all'):
         """
         Process client-uploaded CSV data
         Expected format: Date, Ticker, Price (or similar)
+        Optional: Sector column for filtering
         """
         try:
             # Read uploaded data
@@ -78,6 +81,14 @@ class IntegratedUniversalBetaModel:
             
             # Convert date column
             df['date'] = pd.to_datetime(df['date'])
+            
+            # Apply sector filtering if sector column exists and filter is specified
+            if sector_filter != 'all' and 'sector' in df.columns:
+                original_count = len(df)
+                df = df[df['sector'].str.lower() == sector_filter.lower()]
+                logger.info(f"Sector filter '{sector_filter}' applied: {original_count} -> {len(df)} rows")
+            elif sector_filter != 'all' and 'sector' not in df.columns:
+                logger.warning(f"Sector filter '{sector_filter}' requested but no 'sector' column found")
             
             # Sort by ticker and date
             df = df.sort_values(['ticker', 'date'])
@@ -152,7 +163,9 @@ class IntegratedUniversalBetaModel:
         
         for col in ['ret_1d', 'ret_5d', 'ret_20d', 'Z_ma_20d', 'vol_63d', 'vol_126d', 'vol_252d', 'vol_756d']:
             if col in feature_df.columns:
-                feature_df[f'cs_rank_{col}'] = date_groups[col].rank(pct=True)
+                # Create cs_rank columns with lowercase names to match feature_columns list
+                rank_col_name = f'cs_rank_{col}'.lower()
+                feature_df[rank_col_name] = date_groups[col].rank(pct=True)
         
         # Cross-sectional dispersion
         feature_df['xsec_disp_30d'] = date_groups['return'].transform('std')
@@ -163,7 +176,7 @@ class IntegratedUniversalBetaModel:
         logger.info(f"Calculated features for {len(feature_df)} observations")
         return feature_df
     
-    def train_and_predict(self, feature_df, horizon_days=10, test_size=0.3):
+    def train_and_predict(self, feature_df, horizon_days=10, training_days=252, testing_days=63):
         """Train the universal model and generate predictions"""
         
         # Prepare target variable (future beta)
@@ -180,10 +193,29 @@ class IntegratedUniversalBetaModel:
         X = model_df[self.feature_columns]
         y = model_df['future_beta']
         
-        # Time series split for validation
-        tscv = TimeSeriesSplit(n_splits=3)
-        split_idx = list(tscv.split(X))[-1]  # Use the last split
-        train_idx, test_idx = split_idx
+        # Use specific training/testing periods instead of simple percentage split
+        # Sort by date to ensure proper time series split
+        model_df = model_df.sort_values('date')
+        
+        # Calculate split point based on training/testing days
+        total_days_needed = training_days + testing_days
+        if len(model_df) < total_days_needed:
+            logger.warning(f"Insufficient data for specified training/testing split. Using time series split instead.")
+            # Fallback to time series split
+            tscv = TimeSeriesSplit(n_splits=3)
+            split_idx = list(tscv.split(X))[-1]
+            train_idx, test_idx = split_idx
+        else:
+            # Use the most recent data for testing
+            test_start_idx = len(model_df) - testing_days
+            train_end_idx = test_start_idx
+            train_start_idx = max(0, train_end_idx - training_days)
+            
+            train_idx = list(range(train_start_idx, train_end_idx))
+            test_idx = list(range(test_start_idx, len(model_df)))
+            
+            logger.info(f"Using training period: {training_days} days ({len(train_idx)} samples)")
+            logger.info(f"Using testing period: {testing_days} days ({len(test_idx)} samples)")
         
         X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
@@ -313,15 +345,22 @@ class IntegratedUniversalBetaModel:
         logger.info(f"Results saved to {output_dir}")
         return output_dir
     
-    def run_full_pipeline(self, csv_file_path, horizon_days=10, client_id=None):
+    def run_full_pipeline(self, csv_file_path, horizon_days=10, client_id=None, advanced_params=None):
         """Run the complete pipeline from uploaded data to saved results"""
         
+        if advanced_params is None:
+            advanced_params = {}
+            
         try:
             logger.info("Starting Universal Beta Model pipeline...")
+            logger.info(f"Advanced parameters: {advanced_params}")
             
-            # Step 1: Process uploaded data
+            # Step 1: Process uploaded data with sector filtering
             logger.info("Step 1: Processing uploaded data...")
-            processed_data = self.process_uploaded_data(csv_file_path)
+            processed_data = self.process_uploaded_data(
+                csv_file_path, 
+                sector_filter=advanced_params.get('sector_filter', 'all')
+            )
             
             # Step 2: Calculate features
             logger.info("Step 2: Calculating features...")
@@ -329,7 +368,31 @@ class IntegratedUniversalBetaModel:
             
             # Step 3: Train model and generate predictions
             logger.info("Step 3: Training model and generating predictions...")
-            results = self.train_and_predict(feature_data, horizon_days)
+            results = self.train_and_predict(
+                feature_data, 
+                horizon_days=horizon_days,
+                training_days=advanced_params.get('training_days', 252),
+                testing_days=advanced_params.get('testing_days', 63)
+            )
+            
+            # Step 4: Handle multi-period predictions if requested
+            if advanced_params.get('multi_period', False):
+                logger.info("Step 3b: Running multi-period predictions...")
+                multi_results = {}
+                for period in [1, 5, 10, 20]:
+                    if period != horizon_days:  # Don't repeat the main horizon
+                        logger.info(f"Running {period}-day predictions...")
+                        period_results = self.train_and_predict(
+                            feature_data, 
+                            horizon_days=period,
+                            training_days=advanced_params.get('training_days', 252),
+                            testing_days=advanced_params.get('testing_days', 63)
+                        )
+                        multi_results[f'{period}d'] = period_results
+                
+                # Add multi-period results to main results
+                results['multi_period_results'] = multi_results
+                logger.info(f"Completed multi-period predictions for {len(multi_results)} additional horizons")
             
             # Step 4: Save results
             logger.info("Step 4: Saving results...")
@@ -345,7 +408,10 @@ class IntegratedUniversalBetaModel:
                     'horizon_days': horizon_days,
                     'model_performance': results['model_performance'],
                     'prediction_file': os.path.join(output_dir, "final_predictions.csv"),
-                    'metrics_file': os.path.join(output_dir, "oos_metrics.csv")
+                    'metrics_file': os.path.join(output_dir, "oos_metrics.csv"),
+                    'advanced_params': advanced_params,
+                    'alpha': self.alpha,
+                    'l1_ratio': self.l1_ratio
                 }
             }
             

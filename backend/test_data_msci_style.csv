@@ -1,0 +1,211 @@
+Date,Ticker,Close,Sector
+2022-01-03,AAPL,182.01,Technology
+2022-01-03,MSFT,334.75,Technology
+2022-01-03,GOOGL,2892.49,Technology
+2022-01-03,AMZN,3407.49,Consumer Discretionary
+2022-01-03,TSLA,1199.78,Consumer Discretionary
+2022-01-03,JPM,169.30,Financials
+2022-01-03,JNJ,171.19,Healthcare
+2022-01-03,XOM,61.83,Energy
+2022-01-03,KO,59.97,Consumer Staples
+2022-01-03,HD,416.01,Consumer Discretionary
+2022-01-04,AAPL,179.70,Technology
+2022-01-04,MSFT,328.80,Technology
+2022-01-04,GOOGL,2833.78,Technology
+2022-01-04,AMZN,3294.61,Consumer Discretionary
+2022-01-04,TSLA,1149.59,Consumer Discretionary
+2022-01-04,JPM,166.55,Financials
+2022-01-04,JNJ,171.72,Healthcare
+2022-01-04,XOM,60.47,Energy
+2022-01-04,KO,59.61,Consumer Staples
+2022-01-04,HD,410.82,Consumer Discretionary
+2022-01-05,AAPL,174.92,Technology
+2022-01-05,MSFT,323.01,Technology
+2022-01-05,GOOGL,2740.34,Technology
+2022-01-05,AMZN,3184.88,Consumer Discretionary
+2022-01-05,TSLA,1064.15,Consumer Discretionary
+2022-01-05,JPM,163.13,Financials
+2022-01-05,JNJ,170.48,Healthcare
+2022-01-05,XOM,58.96,Energy
+2022-01-05,KO,58.89,Consumer Staples
+2022-01-05,HD,402.92,Consumer Discretionary
+2022-01-06,AAPL,172.00,Technology
+2022-01-06,MSFT,310.98,Technology
+2022-01-06,GOOGL,2707.40,Technology
+2022-01-06,AMZN,3073.34,Consumer Discretionary
+2022-01-06,TSLA,1018.43,Consumer Discretionary
+2022-01-06,JPM,158.98,Financials
+2022-01-06,JNJ,167.59,Healthcare
+2022-01-06,XOM,57.49,Energy
+2022-01-06,KO,57.88,Consumer Staples
+2022-01-06,HD,395.16,Consumer Discretionary
+2022-01-07,AAPL,174.14,Technology
+2022-01-07,MSFT,314.04,Technology
+2022-01-07,GOOGL,2718.83,Technology
+2022-01-07,AMZN,3161.48,Consumer Discretionary
+2022-01-07,TSLA,1064.95,Consumer Discretionary
+2022-01-07,JPM,161.38,Financials
+2022-01-07,JNJ,168.62,Healthcare
+2022-01-07,XOM,59.08,Energy
+2022-01-07,KO,58.42,Consumer Staples
+2022-01-07,HD,400.29,Consumer Discretionary
+2022-01-10,AAPL,172.19,Technology
+2022-01-10,MSFT,314.91,Technology
+2022-01-10,GOOGL,2719.70,Technology
+2022-01-10,AMZN,3123.97,Consumer Discretionary
+2022-01-10,TSLA,1049.61,Consumer Discretionary
+2022-01-10,JPM,159.31,Financials
+2022-01-10,JNJ,169.34,Healthcare
+2022-01-10,XOM,58.84,Energy
+2022-01-10,KO,58.78,Consumer Staples
+2022-01-10,HD,397.43,Consumer Discretionary
+2022-01-11,AAPL,175.08,Technology
+2022-01-11,MSFT,320.89,Technology
+2022-01-11,GOOGL,2751.80,Technology
+2022-01-11,AMZN,3180.74,Consumer Discretionary
+2022-01-11,TSLA,1106.22,Consumer Discretionary
+2022-01-11,JPM,162.48,Financials
+2022-01-11,JNJ,170.63,Healthcare
+2022-01-11,XOM,60.72,Energy
+2022-01-11,KO,59.18,Consumer Staples
+2022-01-11,HD,404.02,Consumer Discretionary
+2022-01-12,AAPL,176.12,Technology
+2022-01-12,MSFT,327.89,Technology
+2022-01-12,GOOGL,2765.31,Technology
+2022-01-12,AMZN,3212.63,Consumer Discretionary
+2022-01-12,TSLA,1106.47,Consumer Discretionary
+2022-01-12,JPM,164.92,Financials
+2022-01-12,JNJ,172.88,Healthcare
+2022-01-12,XOM,62.14,Energy
+2022-01-12,KO,60.01,Consumer Staples
+2022-01-12,HD,408.96,Consumer Discretionary
+2022-01-13,AAPL,172.19,Technology
+2022-01-13,MSFT,322.59,Technology
+2022-01-13,GOOGL,2720.26,Technology
+2022-01-13,AMZN,3114.93,Consumer Discretionary
+2022-01-13,TSLA,1031.59,Consumer Discretionary
+2022-01-13,JPM,161.55,Financials
+2022-01-13,JNJ,170.94,Healthcare
+2022-01-13,XOM,60.89,Energy
+2022-01-13,KO,59.44,Consumer Staples
+2022-01-13,HD,402.32,Consumer Discretionary
+2022-01-14,AAPL,173.07,Technology
+2022-01-14,MSFT,325.10,Technology
+2022-01-14,GOOGL,2732.17,Technology
+2022-01-14,AMZN,3187.49,Consumer Discretionary
+2022-01-14,TSLA,1049.20,Consumer Discretionary
+2022-01-14,JPM,163.83,Financials
+2022-01-14,JNJ,172.04,Healthcare
+2022-01-14,XOM,61.47,Energy
+2022-01-14,KO,59.78,Consumer Staples
+2022-01-14,HD,407.70,Consumer Discretionary
+2022-01-17,AAPL,169.80,Technology
+2022-01-17,MSFT,309.42,Technology
+2022-01-17,GOOGL,2655.39,Technology
+2022-01-17,AMZN,3045.52,Consumer Discretionary
+2022-01-17,TSLA,1010.64,Consumer Discretionary
+2022-01-17,JPM,159.69,Financials
+2022-01-17,JNJ,169.48,Healthcare
+2022-01-17,XOM,59.83,Energy
+2022-01-17,KO,58.91,Consumer Staples
+2022-01-17,HD,393.54,Consumer Discretionary
+2022-01-18,AAPL,169.40,Technology
+2022-01-18,MSFT,308.21,Technology
+2022-01-18,GOOGL,2635.09,Technology
+2022-01-18,AMZN,3031.51,Consumer Discretionary
+2022-01-18,TSLA,995.65,Consumer Discretionary
+2022-01-18,JPM,158.35,Financials
+2022-01-18,JNJ,167.82,Healthcare
+2022-01-18,XOM,58.94,Energy
+2022-01-18,KO,58.43,Consumer Staples
+2022-01-18,HD,387.93,Consumer Discretionary
+2022-01-19,AAPL,166.23,Technology
+2022-01-19,MSFT,301.78,Technology
+2022-01-19,GOOGL,2577.89,Technology
+2022-01-19,AMZN,2939.42,Consumer Discretionary
+2022-01-19,TSLA,945.05,Consumer Discretionary
+2022-01-19,JPM,154.33,Financials
+2022-01-19,JNJ,165.71,Healthcare
+2022-01-19,XOM,57.31,Energy
+2022-01-19,KO,57.64,Consumer Staples
+2022-01-19,HD,375.28,Consumer Discretionary
+2022-01-20,AAPL,164.51,Technology
+2022-01-20,MSFT,299.51,Technology
+2022-01-20,GOOGL,2561.17,Technology
+2022-01-20,AMZN,2951.95,Consumer Discretionary
+2022-01-20,TSLA,943.90,Consumer Discretionary
+2022-01-20,JPM,152.84,Financials
+2022-01-20,JNJ,166.48,Healthcare
+2022-01-20,XOM,56.80,Energy
+2022-01-20,KO,57.21,Consumer Staples
+2022-01-20,HD,373.62,Consumer Discretionary
+2022-01-21,AAPL,162.41,Technology
+2022-01-21,MSFT,296.32,Technology
+2022-01-21,GOOGL,2537.78,Technology
+2022-01-21,AMZN,2918.00,Consumer Discretionary
+2022-01-21,TSLA,918.40,Consumer Discretionary
+2022-01-21,JPM,150.70,Financials
+2022-01-21,JNJ,164.90,Healthcare
+2022-01-21,XOM,55.64,Energy
+2022-01-21,KO,56.78,Consumer Staples
+2022-01-21,HD,369.15,Consumer Discretionary
+2022-01-24,AAPL,161.62,Technology
+2022-01-24,MSFT,296.36,Technology
+2022-01-24,GOOGL,2553.44,Technology
+2022-01-24,AMZN,2984.79,Consumer Discretionary
+2022-01-24,TSLA,930.00,Consumer Discretionary
+2022-01-24,JPM,153.07,Financials
+2022-01-24,JNJ,168.09,Healthcare
+2022-01-24,XOM,57.14,Energy
+2022-01-24,KO,57.89,Consumer Staples
+2022-01-24,HD,381.12,Consumer Discretionary
+2022-01-25,AAPL,159.78,Technology
+2022-01-25,MSFT,288.73,Technology
+2022-01-25,GOOGL,2485.48,Technology
+2022-01-25,AMZN,2876.51,Consumer Discretionary
+2022-01-25,TSLA,894.14,Consumer Discretionary
+2022-01-25,JPM,148.83,Financials
+2022-01-25,JNJ,165.55,Healthcare
+2022-01-25,XOM,55.27,Energy
+2022-01-25,KO,56.62,Consumer Staples
+2022-01-25,HD,372.27,Consumer Discretionary
+2022-01-26,AAPL,159.69,Technology
+2022-01-26,MSFT,286.21,Technology
+2022-01-26,GOOGL,2493.37,Technology
+2022-01-26,AMZN,2843.79,Consumer Discretionary
+2022-01-26,TSLA,888.23,Consumer Discretionary
+2022-01-26,JPM,147.64,Financials
+2022-01-26,JNJ,165.00,Healthcare
+2022-01-26,XOM,54.88,Energy
+2022-01-26,KO,56.34,Consumer Staples
+2022-01-26,HD,369.94,Consumer Discretionary
+2022-01-27,AAPL,159.22,Technology
+2022-01-27,MSFT,287.93,Technology
+2022-01-27,GOOGL,2505.06,Technology
+2022-01-27,AMZN,2891.60,Consumer Discretionary
+2022-01-27,TSLA,829.10,Consumer Discretionary
+2022-01-27,JPM,148.31,Financials
+2022-01-27,JNJ,166.17,Healthcare
+2022-01-27,XOM,56.02,Energy
+2022-01-27,KO,57.15,Consumer Staples
+2022-01-27,HD,373.65,Consumer Discretionary
+2022-01-28,AAPL,170.33,Technology
+2022-01-28,MSFT,308.56,Technology
+2022-01-28,GOOGL,2692.50,Technology
+2022-01-28,AMZN,3152.79,Consumer Discretionary
+2022-01-28,TSLA,846.35,Consumer Discretionary
+2022-01-28,JPM,155.15,Financials
+2022-01-28,JNJ,170.22,Healthcare
+2022-01-28,XOM,60.31,Energy
+2022-01-28,KO,58.94,Consumer Staples
+2022-01-28,HD,392.39,Consumer Discretionary
+2022-01-31,AAPL,174.78,Technology
+2022-01-31,MSFT,309.42,Technology
+2022-01-31,GOOGL,2752.88,Technology
+2022-01-31,AMZN,3037.12,Consumer Discretionary
+2022-01-31,TSLA,936.72,Consumer Discretionary
+2022-01-31,JPM,158.98,Financials
+2022-01-31,JNJ,172.39,Healthcare
+2022-01-31,XOM,62.66,Energy
+2022-01-31,KO,59.85,Consumer Staples
+2022-01-31,HD,407.25,Consumer Discretionary

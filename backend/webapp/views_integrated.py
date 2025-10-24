@@ -135,20 +135,26 @@ class IntegratedUploadView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def run_model_background(client_id, file_path, horizon_days):
+def run_model_background(client_id, file_path, horizon_days, advanced_params=None):
     """Background task to run the universal model"""
     try:
+        if advanced_params is None:
+            advanced_params = {}
+            
         # Update status to processing
         ClientModelStatus.set_status(client_id, {
             **ClientModelStatus.get_status(client_id),
             'status': 'processing',
             'stage': 'initializing',
-            'progress': 0
+            'progress': 0,
+            'config': advanced_params
         })
         
-        # Initialize model
+        # Initialize model with advanced parameters
         model = IntegratedUniversalBetaModel(
-            output_dir=os.path.join(settings.MEDIA_ROOT, 'client_results')
+            output_dir=os.path.join(settings.MEDIA_ROOT, 'client_results'),
+            alpha=advanced_params.get('alpha', 0.01),
+            l1_ratio=advanced_params.get('l1_ratio', 0.5)
         )
         
         # Update status
@@ -162,7 +168,8 @@ def run_model_background(client_id, file_path, horizon_days):
         result = model.run_full_pipeline(
             csv_file_path=file_path,
             horizon_days=horizon_days,
-            client_id=client_id
+            client_id=client_id,
+            advanced_params=advanced_params
         )
         
         if result['success']:
@@ -259,6 +266,22 @@ class RunModelView(APIView):
             client_id = request.data.get('client_id')
             horizon_days = int(request.data.get('horizon_days', 10))
             
+            # Extract advanced model parameters
+            advanced_params = {
+                'sector_filter': request.data.get('sector_filter', 'all'),
+                'alpha': float(request.data.get('alpha', 0.01)),
+                'l1_ratio': float(request.data.get('l1_ratio', 0.5)),
+                'training_days': int(request.data.get('training_days', 252)),
+                'testing_days': int(request.data.get('testing_days', 63)),
+                'multi_period': bool(request.data.get('multi_period', False)),
+                # Additional fund manager params (for logging/tracking)
+                'risk_tolerance': request.data.get('risk_tolerance', 'medium'),
+                'minimum_confidence': float(request.data.get('minimum_confidence', 0.6)),
+                'lookback_period': int(request.data.get('lookback_period', 60)),
+                'volatility_adjustment': bool(request.data.get('volatility_adjustment', True)),
+                'cross_sectional_ranking': bool(request.data.get('cross_sectional_ranking', True))
+            }
+            
             if not client_id:
                 return Response({
                     'status': 'error',
@@ -288,7 +311,7 @@ class RunModelView(APIView):
             
             # Start background processing
             executor = ThreadPoolExecutor(max_workers=1)
-            executor.submit(run_model_background, client_id, file_path, horizon_days)
+            executor.submit(run_model_background, client_id, file_path, horizon_days, advanced_params)
             
             return Response({
                 'status': 'success',

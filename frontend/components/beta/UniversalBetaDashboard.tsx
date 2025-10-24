@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -272,7 +273,7 @@ export function UniversalBetaDashboard() {
 
       {/* Model Performance Cards */}
       {dashboardData?.global_performance && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">Global R²</CardTitle>
@@ -344,7 +345,7 @@ export function UniversalBetaDashboard() {
 
         <TabsContent value="opportunities" className="space-y-4">
           {/* Fund Manager Metrics Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <Card>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -375,171 +376,36 @@ export function UniversalBetaDashboard() {
                 </div>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Long/Short Ratio</p>
-                    <p className="text-2xl font-bold">
-                      {dashboardData?.trading_opportunities.length > 0 
-                        ? (dashboardData.trading_opportunities.filter(t => t.direction === 'up').length / 
-                           Math.max(1, dashboardData.trading_opportunities.filter(t => t.direction === 'down').length)).toFixed(1)
-                        : '0.0'
-                      }
-                    </p>
-                  </div>
-                  <TrendingDown className="h-8 w-8 text-orange-600" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Portfolio Impact</p>
-                    <p className="text-2xl font-bold text-green-600">+2.3%</p>
-                    <p className="text-xs text-gray-500">Est. monthly alpha</p>
-                  </div>
-                  <Badge variant="outline" className="text-green-700 border-green-300">
-                    Alpha
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Fund Manager Trading Opportunities</CardTitle>
+              <CardTitle>Top Trading Signals</CardTitle>
               <CardDescription>
-                Enhanced analysis with position sizing, risk metrics, and portfolio impact
+                High-confidence signals from the model
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {dashboardData?.trading_opportunities.slice(0, 15).map((trade, index) => {
-                  // Enhanced fund manager calculations
-                  const confidenceScore = parseFloat(trade.confidence);
-                  const positionSize = Math.min(5, Math.max(0.5, confidenceScore * 5)); // 0.5-5% position
-                  const riskAdjustedReturn = trade.signal_strength * confidenceScore;
-                  const expectedAlpha = (Math.abs(trade.prediction) * confidenceScore * 100);
-                  const sharpeEstimate = riskAdjustedReturn / Math.max(0.1, trade.volatility_rank / 100);
-                  
-                  return (
-                    <div
-                      key={`${trade.ticker}-${index}`}
-                      className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => handleTickerSelect(trade.ticker)}
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
-                        {/* Stock Info */}
-                        <div className="flex items-center gap-3">
-                          {getDirectionIcon(trade.direction)}
-                          <div>
-                            <p className="font-bold text-lg">{trade.ticker}</p>
-                            <p className="text-sm text-gray-500">
-                              β = {trade.prediction.toFixed(4)}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Fund Manager Metrics */}
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600">Position Size</p>
-                          <p className="font-bold text-blue-600">{positionSize.toFixed(1)}%</p>
-                          <p className="text-xs text-gray-500">of portfolio</p>
-                        </div>
-
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600">Expected Alpha</p>
-                          <p className="font-bold text-green-600">+{expectedAlpha.toFixed(1)}bp</p>
-                          <p className="text-xs text-gray-500">monthly</p>
-                        </div>
-
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600">Risk-Adj Return</p>
-                          <p className="font-bold">{riskAdjustedReturn.toFixed(3)}</p>
-                          <p className="text-xs text-gray-500">Sharpe: {sharpeEstimate.toFixed(2)}</p>
-                        </div>
-
-                        {/* Action Items */}
-                        <div className="flex flex-col items-end gap-2">
-                          {getConfidenceBadge(trade.confidence)}
-                          <div className="flex gap-1">
-                            <Badge 
-                              variant="outline" 
-                              className={`text-xs ${
-                                trade.direction === 'up' ? 'text-green-700 border-green-300' : 'text-red-700 border-red-300'
-                              }`}
-                            >
-                              {trade.direction === 'up' ? 'LONG' : 'SHORT'}
-                            </Badge>
-                            {confidenceScore > 0.75 && (
-                              <Badge variant="default" className="text-xs bg-yellow-600">
-                                HIGH CONV
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Additional Risk Metrics Row */}
-                      <div className="mt-3 pt-3 border-t border-gray-100">
-                        <div className="grid grid-cols-4 gap-4 text-xs text-gray-600">
-                          <div>
-                            <span className="font-medium">Vol Rank:</span> {trade.volatility_rank.toFixed(1)}
-                          </div>
-                          <div>
-                            <span className="font-medium">Mom Rank:</span> {trade.momentum_rank.toFixed(1)}
-                          </div>
-                          <div>
-                            <span className="font-medium">Signal:</span> {trade.signal_strength.toFixed(4)}
-                          </div>
-                          <div>
-                            <span className="font-medium">Max DD:</span> ~{(trade.volatility_rank * 0.3).toFixed(1)}%
-                          </div>
-                        </div>
-                      </div>
+              <div className="space-y-2">
+                {dashboardData?.trading_opportunities.slice(0, 30).map((trade, index) => (
+                  <div
+                    key={`${trade.ticker}-${index}`}
+                    className="flex items-center justify-between p-2 border rounded hover:bg-gray-50 cursor-pointer"
+                    onClick={() => handleTickerSelect(trade.ticker)}
+                  >
+                    <div className="flex items-center gap-3">
+                      {getDirectionIcon(trade.direction)}
+                      <Link href={`/stocks/${trade.ticker}`} className="font-medium">
+                        {trade.ticker}
+                      </Link>
+                      <span className="text-sm text-gray-500">β = {trade.prediction.toFixed(4)}</span>
                     </div>
-                  );
-                })}
-              </div>
-
-              {/* Portfolio Summary */}
-              <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                <h4 className="font-medium mb-3">Portfolio Construction Summary</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-600">Total Recommended Exposure:</p>
-                    <p className="font-bold text-lg">
-                      {dashboardData?.trading_opportunities.slice(0, 15).reduce((sum, t) => {
-                        const confidenceScore = parseFloat(t.confidence);
-                        return sum + Math.min(5, Math.max(0.5, confidenceScore * 5));
-                      }, 0).toFixed(1)}%
-                    </p>
+                    <div className="flex items-center gap-3">
+                      {getConfidenceBadge(trade.confidence)}
+                      <Badge variant="outline" className="text-xs">{trade.direction === 'up' ? 'LONG' : 'SHORT'}</Badge>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-gray-600">Estimated Monthly Alpha:</p>
-                    <p className="font-bold text-lg text-green-600">
-                      +{dashboardData?.trading_opportunities.slice(0, 15).reduce((sum, t) => {
-                        const confidenceScore = parseFloat(t.confidence);
-                        return sum + (Math.abs(t.prediction) * confidenceScore * 100);
-                      }, 0).toFixed(0)} bp
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Portfolio Beta Impact:</p>
-                    <p className="font-bold text-lg">
-                      {dashboardData?.trading_opportunities.slice(0, 15).reduce((sum, t) => {
-                        const confidenceScore = parseFloat(t.confidence);
-                        const positionSize = Math.min(5, Math.max(0.5, confidenceScore * 5)) / 100;
-                        return sum + (t.prediction * positionSize);
-                      }, 0).toFixed(3)}
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -563,7 +429,7 @@ export function UniversalBetaDashboard() {
                   >
                     <div className="flex items-center gap-3">
                       {getDirectionIcon(pred.direction)}
-                      <span className="font-medium">{pred.ticker}</span>
+                      <Link href={`/stocks/${pred.ticker}`} className="font-medium">{pred.ticker}</Link>
                       <span className="text-sm text-gray-500">{pred.date}</span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -600,7 +466,7 @@ export function UniversalBetaDashboard() {
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-gray-500">#{index + 1}</span>
-                      <span className="font-medium">{stock.ticker}</span>
+                      <Link href={`/stocks/${stock.ticker}`} className="font-medium">{stock.ticker}</Link>
                       <Badge variant="outline">{stock.performance_tier}</Badge>
                     </div>
                     <div className="text-right">
