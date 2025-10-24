@@ -15,6 +15,7 @@ import glob
 from pathlib import Path
 import logging # <-- Add logging
 
+from django.db.models import Avg
 
 from .model_runner import run_analysis_from_web
 
@@ -748,11 +749,24 @@ def information_file(request, pk):
 
 @api_view(["GET"])
 def factor_shared(request):
-    """Returns the latest FactorSharedStats summary (averages, coefs, etc)."""
+    """Returns the latest FactorSharedStats summary (averages, coefs, etc)
+    plus average Y-Intercept from per-stock results."""
     try:
         latest_shared = FactorSharedStats.objects.latest("created_at")
         serializer = FactorSharedStatsSerializer(latest_shared)
-        return Response(serializer.data)
+        data = serializer.data
+
+        avg_y_intercept = (
+            StockFactorResult.objects
+            .filter(shared_stats=latest_shared)
+            .aggregate(Avg("y_intercept"))
+            ["y_intercept__avg"]
+        )
+
+        data["y_intercept"] = avg_y_intercept  # append to JSON output
+
+        return Response(data)
+
     except FactorSharedStats.DoesNotExist:
         return Response({}, status=status.HTTP_404_NOT_FOUND)
 

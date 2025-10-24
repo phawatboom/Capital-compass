@@ -162,25 +162,6 @@ export function BetaDashboard() {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={fetchSummaryData}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button
-            onClick={handleImportData}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Import Latest Data
-          </Button>
-        </div>
       </div>
 
       {/* Error Alert */}
@@ -192,7 +173,7 @@ export function BetaDashboard() {
       )}
         {/* Global Factor Stats Cards */}
         {sharedStats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             {/* Global R² */}
             <Card>
               <CardHeader className="pb-2">
@@ -219,6 +200,20 @@ export function BetaDashboard() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   ElasticNet intercept term for volatility
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {sharedStats.y_intercept?.toFixed(3) ?? "N/A"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Model baseline term (average intercept across all tickers)
                 </p>
               </CardContent>
             </Card>

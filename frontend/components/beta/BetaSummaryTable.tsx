@@ -32,6 +32,13 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
   const [confidenceFilter, setConfidenceFilter] = useState('all');
   const [sortField, setSortField] = useState<keyof BetaSummary>('latest_date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  const paginatedData = filteredData.slice(
+      (currentPage - 1) * itemsPerPage,
+      currentPage * itemsPerPage
+    );
 
   useEffect(() => {
     let filtered = [...data];
@@ -176,9 +183,6 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                   β Coefficient {sortField === 'b_coefficient' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
                 <TableHead>Trend</TableHead>
-                <TableHead onClick={() => handleSort('y_intercept')} className="cursor-pointer hover:bg-gray-50">
-                  Y-Intercept {sortField === 'y_intercept' && (sortOrder === 'asc' ? '↑' : '↓')}
-                </TableHead>
                 <TableHead onClick={() => handleSort('volatility')} className="cursor-pointer hover:bg-gray-50">
                   Volatility {sortField === 'volatility' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
@@ -256,7 +260,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
             </TableHeader>
 
             <TableBody>
-              {filteredData.map((item) => (
+              {paginatedData.map((item) => (
                 <TableRow key={item.ticker}>
                   <TableCell className="font-medium">{item.ticker}</TableCell>
                   <TableCell>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</TableCell>
@@ -274,7 +278,6 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                     )}
                   </TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.y_intercept)}</TableCell>
                   <TableCell className="font-mono">{formatNumber(item.volatility)}</TableCell>
 
                   <TableCell className="font-mono">{formatNumber(item.train_b)}</TableCell>
@@ -316,6 +319,36 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
         {filteredData.length === 0 && (
           <div className="text-center py-8 text-gray-500">
             No data available for the selected filters.
+          </div>
+        )}
+        {/* Pagination Controls */}
+        {filteredData.length > itemsPerPage && (
+          <div className="flex justify-center items-center gap-3 mt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage === 1}
+            >
+              Previous
+            </Button>
+
+            <span className="text-sm text-gray-600">
+              Page {currentPage} of {Math.ceil(filteredData.length / itemsPerPage)}
+            </span>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setCurrentPage((p) =>
+                  Math.min(p + 1, Math.ceil(filteredData.length / itemsPerPage))
+                )
+              }
+              disabled={currentPage === Math.ceil(filteredData.length / itemsPerPage)}
+            >
+              Next
+            </Button>
           </div>
         )}
       </CardContent>
