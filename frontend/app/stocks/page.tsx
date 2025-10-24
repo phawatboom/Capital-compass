@@ -64,19 +64,6 @@ export default function StocksPage() {
       {loading && <p>Loading stocks...</p>}
       {error && <p className="text-red-600">{error}</p>}
 
-      <select
-        className="border px-3 py-2 rounded shadow-sm mb-6"
-        value={filterMode}
-        onChange={(e) => {
-          setFilterMode(e.target.value as "all" | "trending" | "meanreverting");
-          setCurrentPage(1);
-        }}
-      >
-        <option value="all">All Stocks</option>
-        <option value="trending">{"Trending Stocks (β > 0, significant)"}</option>
-        <option value="meanreverting">{"Mean-Reverting Stocks (β < 0, significant)"}</option>
-      </select>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {currentStocks.map((stock) => (
           <Link
