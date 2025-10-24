@@ -122,24 +122,19 @@ export default function SiteHeader() {
       <Link href="/" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Home
       </Link>
-      <Link href="/uploads" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
-        My Data
-      </Link>
-      {/*<Link href="/dashboard" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>*/}
-      {/*  Dashboard*/}
-      {/*</Link>*/}
-      {/*<Link href="/reports" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>*/}
-      {/*  Reports*/}
-      {/*</Link>*/}
-      <Link href="/upload" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
-        Upload Data
+      <Link href="/beta" className="py-2 text-gray-700 hover:text-gray-900 font-medium" onClick={onClick}>
+        Beta Analysis Platform
       </Link>
       <Link href="/stocks" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Stocks
       </Link>
-      <Link href="/beta" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
-        Beta Analysis
-      </Link>
+      {/* Legacy routes redirected to Beta Analysis */}
+      {/*<Link href="/uploads" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>*/}
+      {/*  My Data*/}
+      {/*</Link>*/}
+      {/*<Link href="/upload" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>*/}
+      {/*  Upload Data*/}
+      {/*</Link>*/}
     </>
   );
 

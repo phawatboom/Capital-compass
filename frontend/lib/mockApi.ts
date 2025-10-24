@@ -16,7 +16,7 @@ export async function createUpload(file: File): Promise<Upload> {
   await delay(1000)
 
   // Validate file
-  if (!file.name.toLowerCase().endsWith(".csv")) {
+  if (!file || !file.name || !file.name.toLowerCase().endsWith(".csv")) {
     throw new Error("Please upload a CSV file (.csv)")
   }
 

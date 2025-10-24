@@ -31,6 +31,23 @@ from .views import (
     ImportBetaDataView,
 )
 
+# Universal model imports
+from .views_universal import (
+    ImportUniversalDataView,
+    UniversalBetaDashboardView,
+    UniversalBetaTimeSeriesView,
+    UniversalModelSummaryView,
+)
+
+# Integrated workflow imports
+from .views_integrated import (
+    IntegratedUploadView,
+    RunModelView,
+    ClientStatusView,
+    ClientResultsView,
+    ClientListView,
+)
+
 urlpatterns = [
     # Data & files
     path('upload-csv/', FileUploadView.as_view(), name='upload-csv'),
@@ -67,4 +84,17 @@ urlpatterns = [
     path('beta/summary/', BetaCoefficientSummaryView.as_view(), name='beta-summary'),
     path('beta/timeseries/<str:ticker>/', BetaCoefficientTimeSeriesView.as_view(), name='beta-timeseries'),
     path('beta/import/', ImportBetaDataView.as_view(), name='import-beta-data'),
+    
+    # Universal Beta Model endpoints (PRIMARY for client use)
+    path('universal/import/', ImportUniversalDataView.as_view(), name='universal-import'),
+    path('universal/dashboard/', UniversalBetaDashboardView.as_view(), name='universal-dashboard'),
+    path('universal/timeseries/', UniversalBetaTimeSeriesView.as_view(), name='universal-timeseries'),
+    path('universal/summary/', UniversalModelSummaryView.as_view(), name='universal-summary'),
+    
+    # Integrated Client Workflow endpoints (Upload -> Process -> View)
+    path('integrated/upload/', IntegratedUploadView.as_view(), name='integrated-upload'),
+    path('integrated/run-model/', RunModelView.as_view(), name='integrated-run-model'),
+    path('integrated/status/<str:client_id>/', ClientStatusView.as_view(), name='integrated-status'),
+    path('integrated/results/<str:client_id>/', ClientResultsView.as_view(), name='integrated-results'),
+    path('integrated/clients/', ClientListView.as_view(), name='integrated-clients'),
 ]
