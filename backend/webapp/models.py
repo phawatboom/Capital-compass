@@ -3,7 +3,8 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.core.validators import FileExtensionValidator
-from django.contrib.auth.models import User 
+from django.contrib.auth.models import User
+from django.db.models import JSONField
 from django.utils import timezone
 from django.db import transaction  # (May be unused; retained if future atomic ops needed)
 """Domain models and model-level helpers (no API views here).
@@ -317,6 +318,111 @@ class ForecastEvaluation(models.Model):
     
     def __str__(self):
         return f"{self.ticker} {self.date}: β_pred={self.beta_pred:.3f}, R²={self.r2_ols:.3f}"
+
+
+class FactorSharedStats(models.Model):
+    """Stores the pooled ElasticNet model's shared/global coefficients and factor averages."""
+    created_at = models.DateTimeField(default=timezone.now)
+    model_used = models.CharField(max_length=50, default="enet")
+
+    # --- Coefficients (ElasticNet learned weights for each factor) ---
+    coef_train_b = models.FloatField(null=True, blank=True)
+    coef_lag_train_b = models.FloatField(null=True, blank=True)
+    coef_ar1_corr_10d = models.FloatField(null=True, blank=True)
+    coef_ar1_corr_20d = models.FloatField(null=True, blank=True)
+    coef_ar1_corr_60d = models.FloatField(null=True, blank=True)
+    coef_sign_persist_20d = models.FloatField(null=True, blank=True)
+    coef_sign_persist_60d = models.FloatField(null=True, blank=True)
+    coef_ret_1d = models.FloatField(null=True, blank=True)
+    coef_ret_5d = models.FloatField(null=True, blank=True)
+    coef_ret_20d = models.FloatField(null=True, blank=True)
+    coef_vol_63d = models.FloatField(null=True, blank=True)
+    coef_vol_126d = models.FloatField(null=True, blank=True)
+    coef_vol_252d = models.FloatField(null=True, blank=True)
+    coef_vol_756d = models.FloatField(null=True, blank=True)
+    coef_Z_ma_20d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_ret_1d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_ret_5d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_ret_20d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_z_ma_20d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_vol_63d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_vol_126d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_vol_252d = models.FloatField(null=True, blank=True)
+    coef_cs_rank_vol_756d = models.FloatField(null=True, blank=True)
+
+    # --- Averages (cross-sectional means for each factor at end of training sample) ---
+    avg_train_b = models.FloatField(null=True, blank=True)
+    avg_lag_train_b = models.FloatField(null=True, blank=True)
+    avg_ar1_corr_10d = models.FloatField(null=True, blank=True)
+    avg_ar1_corr_20d = models.FloatField(null=True, blank=True)
+    avg_ar1_corr_60d = models.FloatField(null=True, blank=True)
+    avg_sign_persist_20d = models.FloatField(null=True, blank=True)
+    avg_sign_persist_60d = models.FloatField(null=True, blank=True)
+    avg_ret_1d = models.FloatField(null=True, blank=True)
+    avg_ret_5d = models.FloatField(null=True, blank=True)
+    avg_ret_20d = models.FloatField(null=True, blank=True)
+    avg_vol_63d = models.FloatField(null=True, blank=True)
+    avg_vol_126d = models.FloatField(null=True, blank=True)
+    avg_vol_252d = models.FloatField(null=True, blank=True)
+    avg_vol_756d = models.FloatField(null=True, blank=True)
+    avg_Z_ma_20d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_ret_1d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_ret_5d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_ret_20d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_z_ma_20d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_vol_63d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_vol_126d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_vol_252d = models.FloatField(null=True, blank=True)
+    avg_cs_rank_vol_756d = models.FloatField(null=True, blank=True)
+
+    # --- Model-level metrics ---
+    r2_global = models.FloatField(null=True, blank=True)
+    volatility_coeff = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"SharedStats ({self.model_used}) @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+
+
+class StockFactorResult(models.Model):
+    """Stores per-stock factor regression and forecast results (linked to a shared model)."""
+    created_at = models.DateTimeField(default=timezone.now)
+    ticker = models.CharField(max_length=50)
+    shared_stats = models.ForeignKey(
+        FactorSharedStats, on_delete=models.CASCADE, related_name="stocks", null=True, blank=True
+    )
+
+    # --- Regression outputs ---
+    b_coefficient = models.FloatField(null=True, blank=True)  # Predicted next-period b
+    volatility = models.FloatField(null=True, blank=True)
+    y_intercept = models.FloatField(null=True, blank=True)
+
+    # --- Core factor columns (explicit) ---
+    train_b = models.FloatField(null=True, blank=True)
+    lag_train_b = models.FloatField(null=True, blank=True)
+    ar1_corr_10d = models.FloatField(null=True, blank=True)
+    ar1_corr_20d = models.FloatField(null=True, blank=True)
+    ar1_corr_60d = models.FloatField(null=True, blank=True)
+    sign_persist_20d = models.FloatField(null=True, blank=True)
+    sign_persist_60d = models.FloatField(null=True, blank=True)
+    ret_1d = models.FloatField(null=True, blank=True)
+    ret_5d = models.FloatField(null=True, blank=True)
+    ret_20d = models.FloatField(null=True, blank=True)
+    vol_63d = models.FloatField(null=True, blank=True)
+    vol_126d = models.FloatField(null=True, blank=True)
+    vol_252d = models.FloatField(null=True, blank=True)
+    vol_756d = models.FloatField(null=True, blank=True)
+    Z_ma_20d = models.FloatField(null=True, blank=True)
+    cs_rank_ret_1d = models.FloatField(null=True, blank=True)
+    cs_rank_ret_5d = models.FloatField(null=True, blank=True)
+    cs_rank_ret_20d = models.FloatField(null=True, blank=True)
+    cs_rank_z_ma_20d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_63d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_126d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_252d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_756d = models.FloatField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.ticker} @ {self.created_at:%Y-%m-%d}"
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):

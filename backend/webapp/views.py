@@ -1,9 +1,11 @@
 import csv
 import io
+import math
 import os
 import subprocess
 import sys
 import pandas as pd
+import json
 import numpy as np
 from django.db import transaction
 from django.conf import settings
@@ -13,6 +15,10 @@ import glob
 from pathlib import Path
 import logging # <-- Add logging
 
+from django.db.models import Avg
+
+from .model_runner import run_analysis_from_web
+
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
@@ -20,7 +26,7 @@ from datetime import datetime
 from django.utils import timezone
 from django.contrib.auth import authenticate, login, logout
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.http import FileResponse
+from django.http import FileResponse, JsonResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
@@ -30,11 +36,20 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult, BetaForecastResult, MeanReversionResult
+from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult, BetaForecastResult, MeanReversionResult, FactorSharedStats, StockFactorResult
 from datetime import date, datetime
-from django.http import FileResponse
 from django.contrib.auth import update_session_auth_hash
 from rest_framework.decorators import parser_classes
+
+
+def _model_field_names(model_cls):
+    # concrete, non-relational field names
+    return {f.name for f in model_cls._meta.get_fields() if hasattr(f, "attname") and not f.many_to_many and not f.one_to_many}
+
+def _safe_create(model_cls, payload: dict):
+    fields = _model_field_names(model_cls)
+    clean = {k: v for k, v in payload.items() if k in fields}
+    return model_cls.objects.create(**clean)
 
 # ================= New / Refactored Analysis Views (synchronous execution) ================= #
 
@@ -69,147 +84,215 @@ class DownloadAnalysisResultView(APIView):
         return FileResponse(open(f, 'rb'), as_attachment=True, filename=f.name)
 
 class RunAnalysisView(APIView):
+    """
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # --- Required parameters ---
         csv_upload_id = request.data.get('csv_upload_id')
         if not csv_upload_id:
             return Response({'success': False, 'error': 'csv_upload_id required'}, status=400)
-        analysis_type = request.data.get('analysis_type', 'beta')  # mr|beta|combined
-        mode = request.data.get('mode', 'forecast')  # forecast|backtest
+
+        mode = request.data.get('mode', 'forecast')  # forecast or backtest
         parameters = request.data.get('parameters', {}) or {}
+
+        # --- Get uploaded file record ---
         try:
             upload = CSVUploadRecord.objects.get(id=csv_upload_id, user=request.user)
         except CSVUploadRecord.DoesNotExist:
             return Response({'success': False, 'error': 'Upload not found'}, status=404)
 
+        # --- Create analysis record ---
         analysis = AnalysisResult.objects.create(
             user=request.user,
             csv_upload=upload,
-            analysis_type=analysis_type,
+            analysis_type='b_forecast_pipeline_extended',
             parameters=parameters,
             status='running',
             started_at=timezone.now()
         )
 
+        # --- Resolve model file path ---
         project_root = Path(settings.BASE_DIR).parent
-        candidates = [
-            'Data Analysis/main_model_file_merged_bcoef_strategy1_stats_legacy (1).py',
-            'Data Analysis/main_model_file_stable_2_extended_future_prediciton_bhat.py',
-            'Data Analysis/main_model_file_stable_2_extended_future_prediciton.py'
-        ]
-        script_path = None
-        for rel in candidates:
-            p = project_root / rel
-            if p.exists():
-                script_path = p
-                break
-        if not script_path:
+
+        # ✅ NEW MODEL FILE (Active)
+        script_path = project_root / 'Data Analysis' / 'b_forecast_pipeline_extended.py'
+
+
+        # --- LEGACY MODEL FILES (Preserved for rollback) ---
+        # candidates = [
+        #     'Data Analysis/main_model_file_merged_bcoef_strategy1_stats_legacy (1).py',
+        #     'Data Analysis/main_model_file_stable_2_extended_future_prediciton_bhat.py',
+        #     'Data Analysis/main_model_file_stable_2_extended_future_prediciton.py'
+        # ]
+        # for candidate in candidates:
+        #     potential = project_root / candidate
+        #     if potential.exists():
+        #         script_path = potential
+        #         break
+
+        if not script_path.exists():
             analysis.status = 'failed'
-            analysis.error_message = 'No analysis script found'
+            analysis.error_message = f'Model script not found: {script_path}'
             analysis.completed_at = timezone.now()
             analysis.save()
-            return Response({'success': False, 'error': 'Script not found'}, status=500)
+            return Response({'success': False, 'error': 'Model script not found'}, status=500)
 
+        # --- Prepare output directory ---
         output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        cmd = [sys.executable, str(script_path), '--mode', mode, '--excel', upload.filename.path, '--out', str(output_dir)]
-        if analysis_type == 'beta':
-            cmd += ['--bcoef', 'on', '--strategy', parameters.get('strategy', '1')]
-        elif analysis_type == 'mr':
-            cmd += ['--bcoef', 'off']
-        else:
-            cmd += ['--bcoef', 'on', '--combined', '1']
-        for prm, flag in [('train_years','--train_years'), ('min_coverage','--min_coverage'), ('threshold_fixed','--threshold_fixed')]:
+        # --- Build command (NEW MODEL) ---
+        cmd = [
+            sys.executable,
+            str(script_path),
+            '--mode', mode,
+            '--file', upload.filename.path,  # Input file path
+            '--out', str(output_dir)
+        ]
+
+        # --- Optional additional parameters ---
+        for prm, flag in [
+            ('train_years', '--train_years'),
+            ('min_coverage', '--min_coverage'),
+            ('threshold_fixed', '--threshold_fixed')
+        ]:
             if prm in parameters:
                 cmd += [flag, str(parameters[prm])]
 
-        logger.info(f"Executing analysis {analysis.id}: {' '.join(cmd)}")
+        logger.info(f"[RunAnalysisView] Running b_forecast_pipeline_extendedl.py for analysis {analysis.id}:\n{' '.join(cmd)}")
+
+        # --- LEGACY COMMAND STRUCTURE (Preserved) ---
+        # cmd = [sys.executable, str(script_path), '--mode', mode, '--excel', upload.filename.path, '--out', str(output_dir)]
+        # if analysis_type == 'beta':
+        #     cmd += ['--bcoef', 'on', '--strategy', parameters.get('strategy', '1')]
+        # elif analysis_type == 'mr':
+        #     cmd += ['--bcoef', 'off']
+        # else:
+        #     cmd += ['--bcoef', 'on', '--combined', '1']
+
+        # --- Execute the model script ---
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900
+            )
+
+            if len(proc.stderr) > 50000:
+                proc.stderr = proc.stderr[-50000:]
+
         except subprocess.TimeoutExpired:
-            analysis.status = 'failed'; analysis.error_message = 'timeout'; analysis.completed_at = timezone.now(); analysis.save()
-            return Response({'success': False, 'error': 'Timeout'}, status=500)
+            analysis.status = 'failed'
+            analysis.error_message = 'Timeout after 15 minutes'
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            return Response({'success': False, 'error': 'Analysis timed out'}, status=500)
         except Exception as e:
-            analysis.status = 'failed'; analysis.error_message = str(e); analysis.completed_at = timezone.now(); analysis.save()
+            analysis.status = 'failed'
+            analysis.error_message = f'Execution failed: {e}'
+            analysis.completed_at = timezone.now()
+            analysis.save()
             return Response({'success': False, 'error': str(e)}, status=500)
 
+        # --- Handle script exit ---
         if proc.returncode != 0:
-            analysis.status = 'failed'; analysis.error_message = proc.stderr[-4000:]; analysis.completed_at = timezone.now(); analysis.save()
-            return Response({'success': False, 'error': 'Script failed', 'stderr_tail': proc.stderr[-1000:]}, status=500)
+            analysis.status = 'failed'
+            analysis.error_message = proc.stderr[-2000:]
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            logger.error(f"[RunAnalysisView] Josh_model.py failed for analysis {analysis.id}: {proc.stderr}")
+            return Response({
+                'success': False,
+                'error': 'Model script failed',
+                'stderr': proc.stderr[-2000:]
+            }, status=500)
 
+        # --- Postprocess model outputs ---
         try:
             self._postprocess(analysis, output_dir, mode)
             analysis.status = 'completed'
             analysis.completed_at = timezone.now()
             analysis.save()
         except Exception as e:
-            analysis.status = 'failed'; analysis.error_message = f'Post-processing: {e}'; analysis.completed_at = timezone.now(); analysis.save()
+            analysis.status = 'failed'
+            analysis.error_message = f'Post-processing failed: {e}'
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            logger.error(f"[RunAnalysisView] Post-processing error for analysis {analysis.id}: {e}")
             return Response({'success': False, 'error': str(e)}, status=500)
 
         return Response({'success': True, 'analysis_id': analysis.id})
 
-    def _postprocess(self, analysis, output_dir: Path, mode: str):
-        forecast_files = sorted(output_dir.glob('forecast_*.csv'))
-        backtest_files = sorted(output_dir.glob('predictions_*.csv'))
-        if mode == 'forecast' and forecast_files:
-            latest = max(forecast_files, key=lambda p: p.stat().st_mtime)
-            self._store_forecasts(analysis, latest)
-        elif mode == 'backtest' and backtest_files:
-            self._store_backtests(analysis, backtest_files)
-        else:
-            raise ValueError('No output files generated')
+    # ================= Helper methods ================= #
 
-    def _store_forecasts(self, analysis, csv_path: Path):
-        df = pd.read_csv(csv_path)
-        required = ['Forecast Date','Ticker','Forecast Horizon','Raw Probability','Calibrated Probability','Confidence','Expected Move','Prediction Interval (Low)','Prediction Interval (High)','Momentum Sign','Prediction','Abstained']
-        miss = [c for c in required if c not in df.columns]
-        if miss:
-            raise ValueError(f'Missing forecast columns: {miss}')
-        df['Forecast Date'] = pd.to_datetime(df['Forecast Date']).dt.date
-        ForecastResult.objects.filter(analysis_result=analysis).delete()
-        objs = []
-        for row in df.itertuples():
-            dct = row._asdict()
-            objs.append(ForecastResult(
-                analysis_result=analysis,
-                forecast_date=dct['Forecast Date'],
-                ticker=dct['Ticker'],
-                forecast_horizon=dct['Forecast Horizon'],
-                raw_probability=dct['Raw Probability'],
-                calibrated_probability=dct['Calibrated Probability'],
-                confidence=dct['Confidence'],
-                expected_move=dct['Expected Move'],
-                prediction_interval_low=dct['Prediction Interval (Low)'],
-                prediction_interval_high=dct['Prediction Interval (High)'],
-                momentum_sign=dct['Momentum Sign'],
-                decision_threshold=dct.get('Decision Threshold'),
-                prediction=int(dct['Prediction']),
-                abstained=bool(dct['Abstained'])
-            ))
-        if objs:
-            ForecastResult.objects.bulk_create(objs, batch_size=1000)
+    def _postprocess(self, analysis, output_dir: Path, mode: str):
+        """Handles output files generated by b_forecast_pipeline_extended.py"""
+
+        summary_path = output_dir / 'Outputs' / 'all_model_metrics_summary.csv'
+        coeff_plot = list(output_dir.rglob('enet_coefficients.png'))
+        learning_table = list(output_dir.rglob('learning_table.csv'))
+
+        if summary_path.exists():
+            self._store_b_forecast_summary(analysis, summary_path, coeff_plot, learning_table)
+        else:
+            raise ValueError('No output summary found for b_forecast_pipeline_extended')
+
+    def _store_b_forecast_summary(self, analysis, summary_csv, coeff_plot_files, learning_tables):
+        df = pd.read_csv(summary_csv)
+
+        # ---- Key outputs ----
+        b_coef = float(df['Pred_b_ENET'].iloc[0]) if 'Pred_b_ENET' in df else float('nan')
+        oos_r2 = float(df.get('OOS_R2_global', np.nan))
+        oos_mae = float(df.get('OOS_MAE', np.nan))
+
+        # ---- Load coefficients from ENET model ----
+        coef_file = None
+        for p in coeff_plot_files:
+            if 'enet_coefficients' in str(p):
+                coef_file = p
+                break
+
+        factors = []
+        if coef_file:
+            coef_csv = coef_file.with_suffix('.csv')
+            if coef_csv.exists():
+                coef_df = pd.read_csv(coef_csv)
+                top_factors = coef_df.sort_values(by='coefficient', key=abs, ascending=False).head(10)
+                factors = top_factors.to_dict(orient='records')
+
+        # ---- Load learning table for averages ----
+        avg_factors = {}
+        if learning_tables:
+            lt = pd.read_csv(learning_tables[0])
+            feature_cols = [c for c in lt.columns if any(
+                pref in c for pref in ['ar1_corr', 'vol_', 'sign_persist_', 'ret_', 'Z_ma_', 'cs_rank_'])]
+            avg_factors = lt[feature_cols].mean().to_dict()
+
         analysis.summary_stats = {
-            'total_forecasts': len(df),
-            'unique_tickers': int(df['Ticker'].nunique()),
-            'horizons': sorted(df['Forecast Horizon'].unique().tolist()),
-            'mean_confidence': float(df['Confidence'].mean())
+            'b_coefficient': b_coef,
+            'oos_r2': oos_r2,
+            'oos_mae': oos_mae,
+            'top_factors': factors,
+            'avg_factor_values': avg_factors
         }
-        analysis.save(update_fields=['summary_stats'])
+
+        analysis.status = 'completed'
+        analysis.completed_at = timezone.now()
+        analysis.save()
 
     def _store_backtests(self, analysis, csv_paths):
         BacktestResult.objects.filter(analysis_result=analysis).delete()
-        all_frames = []
-        objs = []
+        all_frames, objs = [], []
+
         for p in csv_paths:
-            horizon = p.stem.replace('predictions_','')
+            horizon = p.stem.replace('predictions_', '')
             df = pd.read_csv(p)
             req = ['Date','ticker','y_true','y_prob_cal','y_pred','fwd_ret','mr_score','confidence','abstained']
             miss = [c for c in req if c not in df.columns]
             if miss:
                 continue
             all_frames.append(df)
+
             for row in df.itertuples():
                 dct = row._asdict()
                 objs.append(BacktestResult(
@@ -225,15 +308,17 @@ class RunAnalysisView(APIView):
                     confidence=float(dct['confidence']),
                     abstained=bool(dct['abstained'])
                 ))
+
         if objs:
             BacktestResult.objects.bulk_create(objs, batch_size=1000)
+
         if all_frames:
             all_df = pd.concat(all_frames, ignore_index=True)
             accuracy = (all_df['y_true'] == all_df['y_pred']).mean()
             analysis.summary_stats = {
                 'total_predictions': int(len(all_df)),
                 'unique_tickers': int(all_df['ticker'].nunique()),
-                'horizons': sorted(set(p.stem.replace('predictions_','') for p in csv_paths)),
+                'horizons': sorted(set(p.stem.replace('predictions_', '') for p in csv_paths)),
                 'overall_accuracy': float(accuracy),
                 'mean_confidence': float(all_df['confidence'].mean())
             }
@@ -252,6 +337,8 @@ from .serializers import (
     UnifiedAnalysisResultSerializer,
     ModelComparisonSerializer,
     AnalysisRequestSerializer,
+    FactorSharedStatsSerializer,
+    StockFactorResultSerializer, StockFactorTimeSeriesSerializer,
 )
 
 def _parse_date(date_str: str) -> date:
@@ -354,49 +441,55 @@ def process_data(df, file, data_type, upload_record):
                     'value': value,
                 })
 
-        # ---- Bulk operations ----
-        # 1. Get existing records in a single query
-        existing_records_filter = {
-            'stock__in': [d['stock'] for d in data_to_process],
-            'data_type': data_type,
-            'date__in': [d['date'] for d in data_to_process]
-        }
-        existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id', 'date', 'id')
+                # ---- Bulk operations ----
+                # 1. Get existing records in a single query
+                existing_records_filter = {
+                    'stock__in': [d['stock'] for d in data_to_process],
+                    'data_type': data_type,
+                    'date__in': [d['date'] for d in data_to_process]
+                }
+                # Fetch all key fields: stock_id, date, data_type, and the PK (id)
+                existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id', 'date',
+                                                                                              'data_type', 'id')
 
-        # Create a map for fast lookup
-        existing_records_map = {
-            (rec['stock_id'], rec['date']): rec['id']
-            for rec in existing_records
-        }
+                # Create a map for fast lookup: (stock_id, date, data_type) -> id
+                existing_records_map = {
+                    (rec['stock_id'], rec['date'], rec['data_type']): rec['id']
+                    for rec in existing_records
+                }
 
-        # 2. Separate into lists for creation and update
-        records_to_create = []
-        records_to_update = []
+                # 2. Separate into lists for creation and update
+                records_to_create = []
+                records_to_update = []
 
-        for data_point in data_to_process:
-            stock_id = data_point['stock'].id
-            date_val = data_point['date']
+                for data_point in data_to_process:
+                    stock_id = data_point['stock'].id
+                    date_val = data_point['date']
+                    data_type_val = data_point['data_type']  # Get the data_type
 
-            if (stock_id, date_val) in existing_records_map:
-                record_id = existing_records_map[(stock_id, date_val)]
-                records_to_update.append(
-                    StockData(
-                        id=record_id,
-                        stock=data_point['stock'],
-                        date=date_val,
-                        data_type=data_point['data_type'],
-                        value=data_point['value']
-                    )
-                )
-            else:
-                records_to_create.append(StockData(**data_point))
+                    # Check for existence using the full unique key
+                    key = (stock_id, date_val, data_type_val)
 
-        # 3. Perform bulk operations
-        if records_to_create:
-            StockData.objects.bulk_create(records_to_create, batch_size=5000)
+                    if key in existing_records_map:
+                        record_id = existing_records_map[key]
+                        records_to_update.append(
+                            StockData(
+                                id=record_id,
+                                stock=data_point['stock'],
+                                date=date_val,
+                                data_type=data_point['data_type'],
+                                value=data_point['value']
+                            )
+                        )
+                    else:
+                        records_to_create.append(StockData(**data_point))
 
-        if records_to_update:
-            StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
+                # 3. Perform bulk operations
+                if records_to_create:
+                    StockData.objects.bulk_create(records_to_create, batch_size=5000)
+
+                if records_to_update:
+                    StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
 
     except Exception as e:
         raise Exception(f"Failed to process {file.name}, data type: {data_type}. Error: {e}")
@@ -421,14 +514,116 @@ class FileUploadView(APIView):
                 upload_record = serializer.save(user=request.user)  # <-- FIX: set the user
                 file_path = upload_record.filename.path
 
-                # Optional: process XLSX or CSV files as before
                 if file_path.endswith('.xlsx'):
-                    sheets_to_process = {'Prices': 'price', 'Returns': 'return'}
+                    # Use model-style reading logic for Excel
                     with pd.ExcelFile(file_path) as xls:
-                        for sheet_name, data_type in sheets_to_process.items():
-                            if sheet_name in xls.sheet_names:
-                                df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
-                                process_data(df, file_obj, data_type, upload_record)
+                        if "Returns" not in xls.sheet_names:
+                            raise ValueError("No 'Returns' sheet found in Excel file.")
+
+                        df = pd.read_excel(xls, sheet_name="Returns", header=None)
+
+                        # --- Detect header row containing "Date" ---
+                        header_row = None
+                        for i in range(min(50, len(df))):
+                            if df.iloc[i].astype(str).str.lower().eq("date").any():
+                                header_row = i
+                                break
+                        if header_row is None:
+                            raise ValueError("No header row containing 'Date' found in sheet.")
+
+                        # --- Assign columns and clean data ---
+                        cols = df.iloc[header_row].astype(str).str.strip().tolist()
+                        data_df = df.iloc[header_row + 1:].copy()
+                        data_df.columns = cols
+                        data_df = data_df.loc[:, ~(data_df.isna().all())]
+
+                        # Ensure 'Date' column is properly parsed
+                        date_col = next((c for c in data_df.columns if str(c).strip().lower() == "date"), None)
+                        if not date_col:
+                            raise ValueError("No 'Date' column found in sheet.")
+                        if date_col != "Date":
+                            data_df = data_df.rename(columns={date_col: "Date"})
+
+                        data_df["Date"] = pd.to_datetime(data_df["Date"], errors="coerce")
+                        data_df = data_df.dropna(subset=["Date"])
+
+                        data_to_process = []
+                        data_type = "return"
+
+                        # --- Create Stock and StockData entries ---
+                        stock_names = [c for c in data_df.columns if c != "Date"]
+                        if not stock_names:
+                            raise ValueError("No stock columns found in sheet.")
+
+                        # Bulk get_or_create for stocks
+                        stocks_map = {name.strip(): Stock.objects.get_or_create(name=name.strip())[0] for name in
+                                      stock_names}
+
+                        # Collect data points (similar structure to what process_data uses)
+                        for stock_name in stock_names:
+                            stock_obj = stocks_map[stock_name]
+                            for _, row in data_df.iterrows():
+                                val = row[stock_name]
+                                if pd.isna(val):
+                                    continue
+
+                                data_to_process.append({
+                                    'stock': stock_obj,
+                                    'date': row["Date"].date(),
+                                    'data_type': data_type,
+                                    'value': float(val),
+                                })
+
+                        # --- Start Upsert Logic ---
+
+                        # 1. Get existing records in a single query (Only query for the relevant stock/date/data_type)
+                        existing_records_filter = {
+                            'stock__in': [d['stock'] for d in data_to_process],
+                            'data_type': data_type,
+                            'date__in': [d['date'] for d in data_to_process]
+                        }
+                        existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id',
+                                                                                                      'date',
+                                                                                                      'data_type', 'id')
+
+                        # Create a map for fast lookup: (stock_id, date, data_type) -> id
+                        existing_records_map = {
+                            (rec['stock_id'], rec['date'], rec['data_type']): rec['id']
+                            for rec in existing_records
+                        }
+
+                        # 2. Separate into lists for creation and update
+                        records_to_create = []
+                        records_to_update = []
+
+                        for data_point in data_to_process:
+                            stock_id = data_point['stock'].id
+                            date_val = data_point['date']
+                            data_type_val = data_point['data_type']
+
+                            key = (stock_id, date_val, data_type_val)
+
+                            if key in existing_records_map:
+                                record_id = existing_records_map[key]
+                                records_to_update.append(
+                                    StockData(
+                                        id=record_id,
+                                        **data_point  # Pass all fields including stock, date, data_type, and value
+                                    )
+                                )
+                            else:
+                                records_to_create.append(StockData(**data_point))
+
+                        # 3. Perform bulk operations
+                        if records_to_create:
+                            StockData.objects.bulk_create(records_to_create, batch_size=5000)
+
+                        if records_to_update:
+                            # Only update the 'value' field
+                            StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
+
+                        print(
+                            f"Successfully imported {len(records_to_create)} new and updated {len(records_to_update)} stock return records from XLSX.")
 
                 elif file_path.endswith('.csv'):
                     df = pd.read_csv(file_path, header=None)
@@ -552,7 +747,100 @@ def information_file(request, pk):
     return Response(info)
 
 
+@api_view(["GET"])
+def factor_shared(request):
+    """Returns the latest FactorSharedStats summary (averages, coefs, etc)
+    plus average Y-Intercept from per-stock results."""
+    try:
+        latest_shared = FactorSharedStats.objects.latest("created_at")
+        serializer = FactorSharedStatsSerializer(latest_shared)
+        data = serializer.data
 
+        avg_y_intercept = (
+            StockFactorResult.objects
+            .filter(shared_stats=latest_shared)
+            .aggregate(Avg("y_intercept"))
+            ["y_intercept__avg"]
+        )
+
+        data["y_intercept"] = avg_y_intercept  # append to JSON output
+
+        return Response(data)
+
+    except FactorSharedStats.DoesNotExist:
+        return Response({}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+@api_view(["GET"])
+def factor_summary(request):
+    """Returns latest per-ticker results for the most recent FactorSharedStats record."""
+    import math
+
+    def safe_json(obj):
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        elif isinstance(obj, list):
+            return [safe_json(x) for x in obj]
+        elif isinstance(obj, dict):
+            return {k: safe_json(v) for k, v in obj.items()}
+        return obj
+
+    try:
+        latest_shared = FactorSharedStats.objects.latest("created_at")
+        stock_results = (
+            StockFactorResult.objects
+            .filter(shared_stats=latest_shared)
+            .order_by("ticker", "-created_at")
+            .distinct("ticker")
+        )
+        serializer = StockFactorResultSerializer(stock_results, many=True)
+        cleaned_data = safe_json(serializer.data)
+        return Response({"summary": cleaned_data})
+    except FactorSharedStats.DoesNotExist:
+        return Response({"summary": []})
+
+
+@api_view(['GET'])
+def beta_timeseries(request, ticker):
+    ticker = ticker.strip().upper()
+    qs = StockFactorResult.objects.filter(ticker__iexact=ticker).order_by("created_at")
+
+    if not qs.exists():
+        return Response({"detail": f"No time series found for ticker {ticker}."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = StockFactorTimeSeriesSerializer(qs, many=True)
+    data = serializer.data
+
+    # Adapt to chart structure
+    response = {
+        "ticker": ticker,
+        "dates": [row["created_at"] for row in data],
+        "beta_pred": [row["b_coefficient"] for row in data],
+        "beta_true": [None for _ in data],  # placeholder until actual betas available
+        "confidence_bands": [{"lower": row["b_coefficient"] - 0.02, "upper": row["b_coefficient"] + 0.02} for row in data]
+    }
+
+    return Response(response, status=status.HTTP_200_OK)
+
+@api_view(["GET"])
+def latest_summary(request):
+    """Return latest per-stock results for the most recent shared model run."""
+    latest_shared = FactorSharedStats.objects.order_by("-created_at").first()
+    if not latest_shared:
+        return Response({"detail": "No shared stats found"}, status=404)
+
+    latest_results = (
+        StockFactorResult.objects
+        .filter(shared_stats=latest_shared)
+        .order_by("ticker", "-created_at")
+        .distinct("ticker")
+    )
+
+    serializer = StockFactorResultSerializer(latest_results, many=True)
+    return Response(serializer.data, status=200)
 # 2. Authentication and Permissions
 #
 #
@@ -736,74 +1024,13 @@ def change_password(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def analyze_upload(request, pk: int):
-    logger.info(f"Starting analysis for upload pk={pk}, user={request.user.username}")
-
-    # 1. Find the uploaded file record
     try:
-        rec = CSVUploadRecord.objects.get(pk=pk, user=request.user)
-    except CSVUploadRecord.DoesNotExist:
-        logger.warning(f"Analysis failed: Upload pk={pk} not found for user={request.user.username}")
-        return Response({"error": "Upload not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    # 2. Define paths
-    project_root = Path(settings.BASE_DIR).parent
-    script_path = project_root / "Data Analysis" / "main_model_file_stable_2_extended_future_prediciton.py"
-
-    if not script_path.exists():
-        logger.error(f"Model script not found at {script_path}")
-        return Response({"error": "Model script not found on server."}, status=500)
-
-    out_dir = Path(settings.MEDIA_ROOT) / "analysis_results" / str(pk)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # 3. Determine file type argument — unified handling for CSV and Excel
-    file_ext = rec.filename.path.split('.')[-1].lower()
-    if file_ext not in ["csv", "xls", "xlsx"]:
-        logger.error(f"Unsupported file type for analysis: {rec.filename.path}")
-        return Response({"error": "Unsupported file type. Only CSV or Excel are allowed."}, status=400)
-
-    # 4. Run the model script (always uses --file)
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--mode", "forecast",
-        "--file", rec.filename.path,   # ✅ unified argument for CSV/Excel
-        "--out", str(out_dir),
-    ]
-    logger.info(f"Running command: {' '.join(cmd)}")
-
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Model script failed for pk={pk}. Stderr: {e.stderr}")
-        return Response(
-            {
-                "error": "Model script failed to execute.",
-                "details": "The analysis script encountered an error.",
-                "stdout": e.stdout[-2000:],
-                "stderr": e.stderr[-2000:],
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    except FileNotFoundError:
-        logger.error("Could not run model script. Is the python interpreter or script path correct?")
-        return Response({"error": "Failed to find the model script or python executable."}, status=500)
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Analysis for pk={pk} timed out.")
-        return Response({"error": "Analysis timed out after 10 minutes."}, status=500)
+        result = run_analysis_from_web(upload_pk=pk, model_for_pred="enet")
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error", "Unknown error"))
+        return Response(result, status=status.HTTP_200_OK)
     except Exception as e:
-        logger.exception(f"An unexpected error occurred while running the model for pk={pk}")
-        return Response({"error": "An unexpected error occurred during analysis.", "detail": str(e)}, status=500)
-
-    # 5. Find the generated output file
-    try:
-        latest_file = sorted(out_dir.glob("forecast_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[0]
-    except IndexError:
-        logger.error(f"Model ran, but no output file was found in {out_dir}")
-        return Response({"error": "Model ran, but no output file was generated."}, status=500)
-
-    logger.info(f"Returning file {latest_file.name} for download.")
-    return FileResponse(open(latest_file, "rb"), as_attachment=True, filename=latest_file.name)
+        return Response({"ok": False, "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class DashboardDataView(APIView):
@@ -1084,634 +1311,659 @@ class BacktestPerformanceView(APIView):
             }
         }
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def analyze_csv(request, pk):
+    """
+    """
     try:
         upload_record = CSVUploadRecord.objects.get(pk=pk, user=request.user)
     except CSVUploadRecord.DoesNotExist:
-        return Response({'error': 'CSV upload not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # Set up paths
-    analysis_dir = os.path.join(settings.BASE_DIR, '..', 'Data Analysis')
-    analysis_script_path = os.path.join(analysis_dir, 'main_model_file_stable_2_extended_future_prediciton.py')
-    
+        return Response({"error": "CSV upload not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # --- Path setup ---
+    project_root = Path(settings.BASE_DIR).parent
+    analysis_dir = project_root / "Data Analysis"
+
+    # ✅ NEW MODEL (Active)
+    script_path = analysis_dir / 'b_forecast_pipeline_extended.py'
+
+    # --- LEGACY MODEL (Preserved) ---
+    # script_path = analysis_dir / "main_model_file_stable_2_extended_future_prediciton.py"
+
+    if not script_path.exists():
+        logger.error(f"Model script not found at {script_path}")
+        return Response({"error": "Model script not found on server."}, status=500)
+
+    out_dir = Path(settings.MEDIA_ROOT) / "analysis_results" / str(pk)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     try:
         # Change to analysis directory
         original_cwd = os.getcwd()
         os.chdir(analysis_dir)
-        
-        # Run analysis
+
+        # ✅ Run Josh_model.py
         cmd = [
-            'python', 'main_model_file_stable_2_extended_future_prediciton.py',
-            '--mode', 'forecast',
-            '--excel', 'MXUS_Data.xlsx',
-            '--out', f'results_{pk}',
-            '--model', 'logit'
+            sys.executable,
+            str(script_path),
+            "--mode", "forecast",
+            "--file", upload_record.filename.path,
+            "--out", str(out_dir),
         ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+        logger.info(f"Running model command: {' '.join(cmd)}")
+
+        # --- LEGACY COMMAND (Preserved) ---
+        # cmd = [
+        #     "python", "main_model_file_stable_2_extended_future_prediciton.py",
+        #     "--mode", "forecast",
+        #     "--excel", "MXUS_Data.xlsx",
+        #     "--out", f"results_{pk}",
+        #     "--model", "logit"
+        # ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         os.chdir(original_cwd)
-        
+
         if result.returncode != 0:
-            logger.error(f"Analysis failed for pk={pk}. Stderr: {result.stderr}")
-            return Response({
-                'error': 'Analysis failed',
-                'details': result.stderr
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # Create AnalysisResult record
+            logger.error(f"Josh_model failed for pk={pk}. Stderr: {result.stderr}")
+            return Response(
+                {"error": "Analysis failed", "details": result.stderr[-2000:]},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # ✅ Create AnalysisResult record
         analysis_result = AnalysisResult.objects.create(
             csv_upload=upload_record,
-            status='completed',
-            parameters={'mode': 'forecast', 'model': 'logit'}
+            status="completed",
+            parameters={"mode": "forecast", "model": "model"},
         )
-        
-        # Parse and save forecast results
-        results_dir = Path(analysis_dir) / f'results_{pk}'
-        forecast_files = list(results_dir.glob('forecast_*.csv'))
-        
+
+        # --- Locate and process forecast results ---
+        forecast_files = list(out_dir.glob("forecast_*.csv"))
         if forecast_files:
             latest_forecast = max(forecast_files, key=os.path.getctime)
-            analysis_result.result_file = str(latest_forecast.relative_to(Path(settings.BASE_DIR).parent))
+            analysis_result.result_file = str(latest_forecast.relative_to(project_root))
             analysis_result.save()
-            
-            # Parse CSV and create ForecastResult records
+
             df = pd.read_csv(latest_forecast)
             forecast_records = []
-            
             for _, row in df.iterrows():
-                forecast_records.append(ForecastResult(
-                    analysis=analysis_result,
-                    ticker=row.get('ticker', ''),
-                    date=pd.to_datetime(row.get('date')).date(),
-                    horizon=row.get('horizon', ''),
-                    raw_probability=float(row.get('raw_probability', 0)),
-                    calibrated_probability=float(row.get('calibrated_probability', 0)),
-                    expected_move=float(row.get('expected_move', 0)),
-                    prediction=int(row.get('prediction', 0)),
-                    confidence=float(row.get('confidence', 0)),
-                    prediction_interval_low=float(row.get('prediction_interval_low', 0)),
-                    prediction_interval_high=float(row.get('prediction_interval_high', 0)),
-                    abstained=bool(row.get('abstained', False))
-                ))
-            
-            # Bulk create for efficiency
+                forecast_records.append(
+                    ForecastResult(
+                        analysis_result=analysis_result,
+                        ticker=row.get("Ticker", ""),
+                        forecast_date=pd.to_datetime(row.get("Forecast Date")).date()
+                        if row.get("Forecast Date") else None,
+                        forecast_horizon=row.get("Forecast Horizon", ""),
+                        raw_probability=float(row.get("Raw Probability", 0)),
+                        calibrated_probability=float(row.get("Calibrated Probability", 0)),
+                        expected_move=float(row.get("Expected Move", 0)),
+                        prediction=int(row.get("Prediction", 0)),
+                        confidence=float(row.get("Confidence", 0)),
+                        prediction_interval_low=float(row.get("Prediction Interval (Low)", 0)),
+                        prediction_interval_high=float(row.get("Prediction Interval (High)", 0)),
+                        abstained=bool(row.get("Abstained", False)),
+                    )
+                )
+
             ForecastResult.objects.bulk_create(forecast_records, batch_size=1000)
-            
-            return Response({
-                'message': 'Analysis completed successfully',
-                'analysis_id': analysis_result.id,
-                'forecast_count': len(forecast_records)
-            })
+            return Response(
+                {
+                    "message": "Analysis completed successfully.",
+                    "analysis_id": analysis_result.id,
+                    "forecast_count": len(forecast_records),
+                }
+            )
         else:
-            return Response({'error': 'No forecast results generated'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
+            return Response({"error": "No forecast results generated."}, status=500)
+
     except Exception as e:
         os.chdir(original_cwd)
-        logger.error(f"Analysis failed for pk={pk}: {str(e)}")
-        return Response({'error': f'Analysis failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"Analysis failed for pk={pk}: {e}")
+        return Response({"error": f"Analysis failed: {e}"}, status=500)
 
 
-# ================= Dual-Model Architecture Views ================= #
-
-class UnifiedAnalysisView(APIView):
-    """Unified analysis endpoint supporting both Mean-Reversion and Beta-Forecasting models"""
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        """Start analysis with model selection"""
-        serializer = AnalysisRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({'success': False, 'error': serializer.errors}, status=400)
-        
-        data = serializer.validated_data
-        upload_id = data['upload_id']
-        model_type = data['model_type']
-        tickers = data.get('tickers', [])
-        
-        try:
-            upload = CSVUploadRecord.objects.get(id=upload_id, user=request.user)
-        except CSVUploadRecord.DoesNotExist:
-            return Response({'success': False, 'error': 'Upload not found'}, status=404)
-        
-        # Create analysis record
-        analysis = AnalysisResult.objects.create(
-            user=request.user,
-            csv_upload=upload,
-            analysis_type=model_type,
-            parameters={'tickers': tickers} if tickers else {},
-            status='running',
-            started_at=timezone.now()
-        )
-        
-        try:
-            # Route to appropriate model execution
-            if model_type == 'mean-reversion':
-                self._run_mean_reversion_analysis(analysis, upload, tickers)
-            elif model_type == 'beta-forecasting':
-                self._run_beta_forecasting_analysis(analysis, upload, tickers)
-            elif model_type == 'both':
-                self._run_both_models_analysis(analysis, upload, tickers)
-            
-            analysis.status = 'completed'
-            analysis.completed_at = timezone.now()
-            analysis.save()
-            
-            return Response({
-                'success': True,
-                'analysis_id': str(analysis.id),
-                'model_type': model_type,
-                'status': 'completed',
-                'tickers': tickers or self._extract_tickers_from_upload(upload),
-                'summary': {
-                    'total': len(tickers) if tickers else self._count_tickers_in_upload(upload),
-                    'completed': len(tickers) if tickers else self._count_tickers_in_upload(upload),
-                    'failed': 0
-                }
-            })
-            
-        except Exception as e:
-            analysis.status = 'failed'
-            analysis.error_message = str(e)
-            analysis.completed_at = timezone.now()
-            analysis.save()
-            logger.error(f"Analysis {analysis.id} failed: {str(e)}")
-            return Response({'success': False, 'error': str(e)}, status=500)
-    
-    def _run_mean_reversion_analysis(self, analysis, upload, tickers=None):
-        """Execute Mean-Reversion model"""
-        project_root = Path(settings.BASE_DIR).parent
-        script_path = project_root / 'Data Analysis' / 'main_model_file_stable_2_extended_future_prediciton.py'
-        
-        if not script_path.exists():
-            raise FileNotFoundError(f"Mean-Reversion script not found: {script_path}")
-        
-        output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        cmd = [sys.executable, str(script_path), '--excel', upload.filename.path, '--out', str(output_dir)]
-        if tickers:
-            cmd += ['--tickers', ','.join(tickers)]
-        
-        logger.info(f"Running Mean-Reversion analysis {analysis.id}: {' '.join(cmd)}")
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
-        
-        if proc.returncode != 0:
-            raise RuntimeError(f"Mean-Reversion script failed: {proc.stderr}")
-        
-        # Process results and store in MeanReversionResult model
-        self._store_mean_reversion_results(analysis, output_dir)
-    
-    def _run_beta_forecasting_analysis(self, analysis, upload, tickers=None):
-        """Execute Beta-Forecasting model"""
-        project_root = Path(settings.BASE_DIR).parent
-        script_path = project_root / 'Data Analysis' / 'bcoef_forecast_v_4_no_market.py'
-        
-        if not script_path.exists():
-            raise FileNotFoundError(f"Beta-Forecasting script not found: {script_path}")
-        
-        output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        cmd = [sys.executable, str(script_path), '--excel', upload.filename.path, '--out', str(output_dir)]
-        if tickers:
-            cmd += ['--tickers', ','.join(tickers)]
-        
-        logger.info(f"Running Beta-Forecasting analysis {analysis.id}: {' '.join(cmd)}")
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
-        
-        if proc.returncode != 0:
-            raise RuntimeError(f"Beta-Forecasting script failed: {proc.stderr}")
-        
-        # Process results and store in BetaForecastResult model
-        self._store_beta_forecast_results(analysis, output_dir)
-    
-    def _run_both_models_analysis(self, analysis, upload, tickers=None):
-        """Execute both models"""
-        self._run_mean_reversion_analysis(analysis, upload, tickers)
-        self._run_beta_forecasting_analysis(analysis, upload, tickers)
-    
-    def _store_mean_reversion_results(self, analysis, output_dir):
-        """Store Mean-Reversion results in database"""
-        # Look for mean-reversion output files
-        result_files = list(output_dir.glob('*mean_reversion*.csv'))
-        if not result_files:
-            result_files = list(output_dir.glob('*mr_results*.csv'))
-        
-        if not result_files:
-            logger.warning(f"No mean-reversion results found in {output_dir}")
-            return
-        
-        latest_file = max(result_files, key=lambda p: p.stat().st_mtime)
-        df = pd.read_csv(latest_file)
-        
-        # Store results (mock implementation - adapt based on actual output format)
-        for _, row in df.iterrows():
-            MeanReversionResult.objects.create(
-                analysis_result=analysis,
-                analysis_date=timezone.now().date(),
-                ticker=row.get('ticker', ''),
-                z_score_current=float(row.get('z_score_current', 0)),
-                z_score_trend=float(row.get('z_score_trend', 0)),
-                mean_reversion_probability=float(row.get('mean_reversion_probability', 0)),
-                reversion_strength=row.get('reversion_strength', 'Moderate'),
-                magnitude_prediction=float(row.get('magnitude_prediction', 0)),
-                magnitude_lower_bound=float(row.get('magnitude_lower_bound', 0)),
-                magnitude_upper_bound=float(row.get('magnitude_upper_bound', 0)),
-                calibration_score=float(row.get('calibration_score', 0)),
-                confidence_interval_90=[
-                    float(row.get('ci_90_lower', 0)),
-                    float(row.get('ci_90_upper', 0))
-                ],
-                confidence_interval_95=[
-                    float(row.get('ci_95_lower', 0)),
-                    float(row.get('ci_95_upper', 0))
-                ],
-                historical_accuracy=float(row.get('historical_accuracy', 0)),
-                lookback_period_days=int(row.get('lookback_period_days', 252)),
-                recommendation=row.get('recommendation', 'HOLD'),
-                recommendation_confidence=float(row.get('recommendation_confidence', 0))
-            )
-    
-    def _store_beta_forecast_results(self, analysis, output_dir):
-        """Store Beta-Forecast results in database"""
-        # Look for beta forecast output files
-        result_files = list(output_dir.glob('*beta_forecast*.csv'))
-        if not result_files:
-            result_files = list(output_dir.glob('*forecast*.csv'))
-        
-        if not result_files:
-            logger.warning(f"No beta forecast results found in {output_dir}")
-            return
-        
-        latest_file = max(result_files, key=lambda p: p.stat().st_mtime)
-        df = pd.read_csv(latest_file)
-        
-        # Store results (adapt based on actual output format)
-        for _, row in df.iterrows():
-            BetaForecastResult.objects.create(
-                analysis_result=analysis,
-                forecast_date=pd.to_datetime(row.get('forecast_date', timezone.now().date())).date(),
-                ticker=row.get('ticker', ''),
-                beta_pred=float(row.get('beta_pred', 0)),
-                beta_pred_ema=float(row.get('beta_pred_ema', 0)),
-                lo=float(row.get('lo', 0)),
-                hi=float(row.get('hi', 0)),
-                r2_ols=float(row.get('r2_ols', 0)),
-                p_value=float(row.get('p_value', 0)),
-                confidence_level=row.get('confidence_level', 'Medium (p≤5%)'),
-                confidence_tier=row.get('confidence_tier', 'Tier-2'),
-                delta_beta_20d=float(row.get('delta_beta_20d', 0)),
-                conf_20d=float(row.get('conf_20d', 0)),
-                agree_adjacent=bool(row.get('agree_adjacent', False)),
-                term_unstable=bool(row.get('term_unstable', False)),
-                action=row.get('action', 'hold'),
-                hold_reason=row.get('hold_reason', '')
-            )
-    
-    def _extract_tickers_from_upload(self, upload):
-        """Extract ticker list from uploaded file"""
-        # Mock implementation - adapt based on actual file structure
-        return ['AAPL', 'MSFT', 'GOOGL']
-    
-    def _count_tickers_in_upload(self, upload):
-        """Count tickers in uploaded file"""
-        return len(self._extract_tickers_from_upload(upload))
-
-
-class UnifiedAnalysisResultView(APIView):
-    """Get unified analysis results for a specific ticker and model"""
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request, ticker, model_type):
-        """Get analysis result for specific ticker and model type"""
-        try:
-            if model_type == 'mean-reversion':
-                results = MeanReversionResult.objects.filter(
-                    analysis_result__user=request.user,
-                    ticker=ticker.upper()
-                ).order_by('-analysis_date').first()
-                
-                if not results:
-                    return Response({'error': 'No mean-reversion results found'}, status=404)
-                
-                serializer = MeanReversionResultSerializer(results)
-                return Response({
-                    'analysis_id': str(results.analysis_result.id),
-                    'model_type': 'mean-reversion',
-                    'ticker': ticker.upper(),
-                    'name': f"{ticker.upper()} Inc.",  # Mock - could be enhanced with company name lookup
-                    'analysis_date': results.analysis_date,
-                    'recommendation': results.recommendation,
-                    'confidence': results.recommendation_confidence,
-                    'model_data': serializer.data
-                })
-                
-            elif model_type == 'beta-forecasting':
-                results = BetaForecastResult.objects.filter(
-                    analysis_result__user=request.user,
-                    ticker=ticker.upper()
-                ).order_by('-forecast_date').first()
-                
-                if not results:
-                    return Response({'error': 'No beta forecast results found'}, status=404)
-                
-                serializer = BetaForecastResultSerializer(results)
-                
-                # Map action to recommendation
-                action_to_recommendation = {
-                    'chase': 'BUY',
-                    'fade': 'SELL',
-                    'hold': 'HOLD'
-                }
-                
-                return Response({
-                    'analysis_id': str(results.analysis_result.id),
-                    'model_type': 'beta-forecasting',
-                    'ticker': ticker.upper(),
-                    'name': f"{ticker.upper()} Inc.",  # Mock - could be enhanced
-                    'analysis_date': results.forecast_date,
-                    'recommendation': action_to_recommendation.get(results.action, 'HOLD'),
-                    'confidence': results.conf_20d,
-                    'model_data': serializer.data
-                })
-            
-            else:
-                return Response({'error': 'Invalid model type'}, status=400)
-                
-        except Exception as e:
-            logger.error(f"Error retrieving unified analysis result: {str(e)}")
-            return Response({'error': str(e)}, status=500)
-
-
-class ModelComparisonView(APIView):
-    """Compare both models for a specific ticker"""
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request, ticker):
-        """Compare both Mean-Reversion and Beta-Forecasting for a ticker"""
-        try:
-            # Get both results
-            mr_view = UnifiedAnalysisResultView()
-            mr_request = request._request if hasattr(request, '_request') else request
-            mr_response = mr_view.get(mr_request, ticker, 'mean-reversion')
-            
-            beta_response = mr_view.get(mr_request, ticker, 'beta-forecasting')
-            
-            if mr_response.status_code != 200 or beta_response.status_code != 200:
-                return Response({'error': 'Results not found for both models'}, status=404)
-            
-            mr_data = mr_response.data
-            beta_data = beta_response.data
-            
-            # Compare recommendations
-            mr_recommendation = mr_data['recommendation']
-            beta_recommendation = beta_data['recommendation']
-            
-            if mr_recommendation == beta_recommendation:
-                agreement = "Strong"
-                primary_recommendation = mr_recommendation
-                confidence_score = max(mr_data['confidence'], beta_data['confidence'])
-            else:
-                agreement = "Conflicting"
-                # Use beta model as primary when conflicting (higher confidence generally)
-                if beta_data['confidence'] > mr_data['confidence']:
-                    primary_recommendation = beta_recommendation
-                    confidence_score = beta_data['confidence']
-                else:
-                    primary_recommendation = mr_recommendation
-                    confidence_score = mr_data['confidence']
-            
-            return Response({
-                'mean_reversion': mr_data,
-                'beta_forecasting': beta_data,
-                'comparison': {
-                    'agreement': agreement,
-                    'primary_recommendation': primary_recommendation,
-                    'confidence_score': confidence_score
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Error in model comparison: {str(e)}")
-            return Response({'error': str(e)}, status=500)
-
-
-# ================= Beta Coefficient Model Output API Views ================= #
-
-class BetaRealizedListView(APIView):
-    """API endpoint for beta realized data from betas_20d.csv"""
-    
-    def get(self, request):
-        from .models import BetaRealized
-        from .serializers import BetaRealizedSerializer
-        
-        ticker = request.query_params.get('ticker')
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        
-        queryset = BetaRealized.objects.all()
-        
-        if ticker:
-            queryset = queryset.filter(ticker=ticker)
-        if start_date:
-            queryset = queryset.filter(date__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(date__lte=end_date)
-        
-        queryset = queryset.order_by('-date', 'ticker')[:1000]  # Limit results
-        
-        serializer = BetaRealizedSerializer(queryset, many=True)
-        return Response({
-            'count': queryset.count(),
-            'results': serializer.data
-        })
-
-
-class ForecastEvaluationListView(APIView):
-    """API endpoint for forecast evaluation data from forecast_eval_20d.csv"""
-    
-    def get(self, request):
-        from .models import ForecastEvaluation
-        from .serializers import ForecastEvaluationSerializer
-        
-        ticker = request.query_params.get('ticker')
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        min_significance = request.query_params.get('min_significance', 0.7)
-        
-        queryset = ForecastEvaluation.objects.all()
-        
-        if ticker:
-            queryset = queryset.filter(ticker=ticker)
-        if start_date:
-            queryset = queryset.filter(date__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(date__lte=end_date)
-        
-        queryset = queryset.filter(significance_score__gte=float(min_significance))
-        queryset = queryset.order_by('-date', 'ticker')[:1000]
-        
-        serializer = ForecastEvaluationSerializer(queryset, many=True)
-        return Response({
-            'count': queryset.count(),
-            'results': serializer.data
-        })
-
-
-class BetaCoefficientSummaryView(APIView):
-    """Summary statistics for beta coefficient predictions"""
-    
-    def get(self, request):
-        from .models import ForecastEvaluation
-        from django.db.models import Avg, Count, Max
-        
-        # Get summary by ticker
-        summary_data = []
-        
-        for ticker_data in ForecastEvaluation.objects.values('ticker').annotate(
-            forecast_count=Count('id'),
-            avg_r2=Avg('r2_ols'),
-            latest_date=Max('date')
-        ).order_by('-forecast_count'):
-            
-            ticker = ticker_data['ticker']
-            latest_record = ForecastEvaluation.objects.filter(
-                ticker=ticker,
-                date=ticker_data['latest_date']
-            ).first()
-            
-            if latest_record:
-                # Calculate prediction accuracy (simplified)
-                prediction_error = abs(latest_record.beta_pred - latest_record.beta_true) if latest_record.beta_true else None
-                accuracy = 1 - min(prediction_error, 1.0) if prediction_error is not None else None
-                
-                confidence_level = 'High' if latest_record.significance_score > 0.8 else 'Medium' if latest_record.significance_score > 0.6 else 'Low'
-                
-                summary_data.append({
-                    'ticker': ticker,
-                    'latest_date': latest_record.date,
-                    'latest_beta_pred': latest_record.beta_pred,
-                    'latest_beta_true': latest_record.beta_true,
-                    'avg_r2_ols': ticker_data['avg_r2'],
-                    'prediction_accuracy': accuracy,
-                    'forecast_count': ticker_data['forecast_count'],
-                    'confidence_level': confidence_level
-                })
-        
-        return Response({
-            'summary': summary_data[:50]  # Top 50 tickers
-        })
-
-
-class BetaCoefficientTimeSeriesView(APIView):
-    """Time series data for a specific ticker's beta coefficient predictions"""
-    
-    def get(self, request, ticker):
-        from .models import ForecastEvaluation
-        
-        queryset = ForecastEvaluation.objects.filter(
-            ticker=ticker
-        ).order_by('date')
-        
-        dates = []
-        beta_pred = []
-        beta_true = []
-        confidence_bands = []
-        
-        for record in queryset:
-            dates.append(record.date)
-            beta_pred.append(record.beta_pred)
-            beta_true.append(record.beta_true)
-            
-            # Calculate confidence bands using the band value
-            confidence_bands.append({
-                'lower': record.beta_pred - record.band,
-                'upper': record.beta_pred + record.band
-            })
-        
-        return Response({
-            'ticker': ticker,
-            'dates': dates,
-            'beta_pred': beta_pred,
-            'beta_true': beta_true,
-            'confidence_bands': confidence_bands
-        })
-
-
-class ImportBetaDataView(APIView):
-    """Import beta coefficient data from CSV files"""
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        from .models import BetaRealized, ForecastEvaluation
-        import csv
-        from django.conf import settings
-        
-        try:
-            # Import betas_20d.csv
-            betas_file = os.path.join(settings.BASE_DIR.parent, 'outputs', 'betas_20d.csv')
-            if os.path.exists(betas_file):
-                with open(betas_file, 'r') as f:
-                    reader = csv.DictReader(f)
-                    beta_objects = []
-                    
-                    for row in reader:
-                        if row['Date'] and row['ticker']:  # Skip empty rows
-                            try:
-                                beta_obj = BetaRealized(
-                                    date=datetime.strptime(row['Date'], '%m/%d/%Y').date(),
-                                    ticker=row['ticker'],
-                                    beta_realised=float(row['beta_realised']) if row['beta_realised'] else None,
-                                    r2_ols_x=float(row['r2_ols_x']) if row['r2_ols_x'] else None,
-                                    r2_ols_y=float(row['r2_ols_y']) if row['r2_ols_y'] else None,
-                                    p_value=float(row['p_value']) if row['p_value'] else None,
-                                    significance_score=float(row['significance_score']) if row['significance_score'] else None,
-                                    beta_pred=float(row['beta_pred']) if row['beta_pred'] else None,
-                                    beta_true=float(row['beta_true']) if row['beta_true'] else None,
-                                    band=float(row['band']) if row['band'] else None,
-                                    lo=float(row['lo']) if row['lo'] else None,
-                                    hi=float(row['hi']) if row['hi'] else None,
-                                )
-                                beta_objects.append(beta_obj)
-                            except (ValueError, KeyError) as e:
-                                continue  # Skip invalid rows
-                    
-                    # Bulk create with ignore conflicts
-                    BetaRealized.objects.bulk_create(beta_objects, ignore_conflicts=True, batch_size=1000)
-            
-            # Import forecast_eval_20d.csv
-            forecast_file = os.path.join(settings.BASE_DIR.parent, 'outputs', 'forecast_eval_20d.csv')
-            if os.path.exists(forecast_file):
-                with open(forecast_file, 'r') as f:
-                    reader = csv.DictReader(f)
-                    forecast_objects = []
-                    
-                    for row in reader:
-                        try:
-                            forecast_obj = ForecastEvaluation(
-                                date=datetime.strptime(row['Date'], '%m/%d/%Y').date(),
-                                ticker=row['ticker'],
-                                r2_ols=float(row['r2_ols']),
-                                p_value=float(row['p_value']),
-                                significance_score=float(row['significance_score']),
-                                beta_pred=float(row['beta_pred']),
-                                beta_true=float(row['beta_true']),
-                                band=float(row['band']),
-                            )
-                            forecast_objects.append(forecast_obj)
-                        except (ValueError, KeyError) as e:
-                            continue
-                    
-                    ForecastEvaluation.objects.bulk_create(forecast_objects, ignore_conflicts=True, batch_size=1000)
-            
-            return Response({
-                'message': 'Beta coefficient data imported successfully',
-                'beta_records': BetaRealized.objects.count(),
-                'forecast_records': ForecastEvaluation.objects.count()
-            })
-            
-        except Exception as e:
-            logger.error(f"Error importing beta data: {str(e)}")
-            return Response({'error': str(e)}, status=500)
+# # ================= Dual-Model Architecture Views ================= #
+#
+# class UnifiedAnalysisView(APIView):
+#     """Unified analysis endpoint supporting both Mean-Reversion and Beta-Forecasting models"""
+#     permission_classes = [IsAuthenticated]
+#
+#     def post(self, request):
+#         """Start analysis with model selection"""
+#         serializer = AnalysisRequestSerializer(data=request.data)
+#         if not serializer.is_valid():
+#             return Response({'success': False, 'error': serializer.errors}, status=400)
+#
+#         data = serializer.validated_data
+#         upload_id = data['upload_id']
+#         model_type = data['model_type']
+#         tickers = data.get('tickers', [])
+#
+#         try:
+#             upload = CSVUploadRecord.objects.get(id=upload_id, user=request.user)
+#         except CSVUploadRecord.DoesNotExist:
+#             return Response({'success': False, 'error': 'Upload not found'}, status=404)
+#
+#         # Create analysis record
+#         analysis = AnalysisResult.objects.create(
+#             user=request.user,
+#             csv_upload=upload,
+#             analysis_type=model_type,
+#             parameters={'tickers': tickers} if tickers else {},
+#             status='running',
+#             started_at=timezone.now()
+#         )
+#
+#         try:
+#             # Route to appropriate model execution
+#             if model_type == 'mean-reversion':
+#                 self._run_mean_reversion_analysis(analysis, upload, tickers)
+#             elif model_type == 'beta-forecasting':
+#                 self._run_beta_forecasting_analysis(analysis, upload, tickers)
+#             elif model_type == 'both':
+#                 self._run_both_models_analysis(analysis, upload, tickers)
+#
+#             analysis.status = 'completed'
+#             analysis.completed_at = timezone.now()
+#             analysis.save()
+#
+#             return Response({
+#                 'success': True,
+#                 'analysis_id': str(analysis.id),
+#                 'model_type': model_type,
+#                 'status': 'completed',
+#                 'tickers': tickers or self._extract_tickers_from_upload(upload),
+#                 'summary': {
+#                     'total': len(tickers) if tickers else self._count_tickers_in_upload(upload),
+#                     'completed': len(tickers) if tickers else self._count_tickers_in_upload(upload),
+#                     'failed': 0
+#                 }
+#             })
+#
+#         except Exception as e:
+#             analysis.status = 'failed'
+#             analysis.error_message = str(e)
+#             analysis.completed_at = timezone.now()
+#             analysis.save()
+#             logger.error(f"Analysis {analysis.id} failed: {str(e)}")
+#             return Response({'success': False, 'error': str(e)}, status=500)
+#
+#     def _run_mean_reversion_analysis(self, analysis, upload, tickers=None):
+#         """Execute Mean-Reversion model"""
+#         project_root = Path(settings.BASE_DIR).parent
+#         script_path = project_root / 'Data Analysis' / 'main_model_file_stable_2_extended_future_prediciton.py'
+#
+#         if not script_path.exists():
+#             raise FileNotFoundError(f"Mean-Reversion script not found: {script_path}")
+#
+#         output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
+#         output_dir.mkdir(parents=True, exist_ok=True)
+#
+#         cmd = [sys.executable, str(script_path), '--excel', upload.filename.path, '--out', str(output_dir)]
+#         if tickers:
+#             cmd += ['--tickers', ','.join(tickers)]
+#
+#         logger.info(f"Running Mean-Reversion analysis {analysis.id}: {' '.join(cmd)}")
+#         proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
+#
+#         if proc.returncode != 0:
+#             raise RuntimeError(f"Mean-Reversion script failed: {proc.stderr}")
+#
+#         # Process results and store in MeanReversionResult model
+#         self._store_mean_reversion_results(analysis, output_dir)
+#
+#     def _run_beta_forecasting_analysis(self, analysis, upload, tickers=None):
+#         """Execute Beta-Forecasting model"""
+#         project_root = Path(settings.BASE_DIR).parent
+#         script_path = project_root / 'Data Analysis' / 'bcoef_forecast_v_4_no_market.py'
+#
+#         if not script_path.exists():
+#             raise FileNotFoundError(f"Beta-Forecasting script not found: {script_path}")
+#
+#         output_dir = Path(settings.MEDIA_ROOT) / 'analysis_results' / str(analysis.id)
+#         output_dir.mkdir(parents=True, exist_ok=True)
+#
+#         cmd = [sys.executable, str(script_path), '--excel', upload.filename.path, '--out', str(output_dir)]
+#         if tickers:
+#             cmd += ['--tickers', ','.join(tickers)]
+#
+#         logger.info(f"Running Beta-Forecasting analysis {analysis.id}: {' '.join(cmd)}")
+#         proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), timeout=900)
+#
+#         if proc.returncode != 0:
+#             raise RuntimeError(f"Beta-Forecasting script failed: {proc.stderr}")
+#
+#         # Process results and store in BetaForecastResult model
+#         self._store_beta_forecast_results(analysis, output_dir)
+#
+#     def _run_both_models_analysis(self, analysis, upload, tickers=None):
+#         """Execute both models"""
+#         self._run_mean_reversion_analysis(analysis, upload, tickers)
+#         self._run_beta_forecasting_analysis(analysis, upload, tickers)
+#
+#     def _store_mean_reversion_results(self, analysis, output_dir):
+#         """Store Mean-Reversion results in database"""
+#         # Look for mean-reversion output files
+#         result_files = list(output_dir.glob('*mean_reversion*.csv'))
+#         if not result_files:
+#             result_files = list(output_dir.glob('*mr_results*.csv'))
+#
+#         if not result_files:
+#             logger.warning(f"No mean-reversion results found in {output_dir}")
+#             return
+#
+#         latest_file = max(result_files, key=lambda p: p.stat().st_mtime)
+#         df = pd.read_csv(latest_file)
+#
+#         # Store results (mock implementation - adapt based on actual output format)
+#         for _, row in df.iterrows():
+#             MeanReversionResult.objects.create(
+#                 analysis_result=analysis,
+#                 analysis_date=timezone.now().date(),
+#                 ticker=row.get('ticker', ''),
+#                 z_score_current=float(row.get('z_score_current', 0)),
+#                 z_score_trend=float(row.get('z_score_trend', 0)),
+#                 mean_reversion_probability=float(row.get('mean_reversion_probability', 0)),
+#                 reversion_strength=row.get('reversion_strength', 'Moderate'),
+#                 magnitude_prediction=float(row.get('magnitude_prediction', 0)),
+#                 magnitude_lower_bound=float(row.get('magnitude_lower_bound', 0)),
+#                 magnitude_upper_bound=float(row.get('magnitude_upper_bound', 0)),
+#                 calibration_score=float(row.get('calibration_score', 0)),
+#                 confidence_interval_90=[
+#                     float(row.get('ci_90_lower', 0)),
+#                     float(row.get('ci_90_upper', 0))
+#                 ],
+#                 confidence_interval_95=[
+#                     float(row.get('ci_95_lower', 0)),
+#                     float(row.get('ci_95_upper', 0))
+#                 ],
+#                 historical_accuracy=float(row.get('historical_accuracy', 0)),
+#                 lookback_period_days=int(row.get('lookback_period_days', 252)),
+#                 recommendation=row.get('recommendation', 'HOLD'),
+#                 recommendation_confidence=float(row.get('recommendation_confidence', 0))
+#             )
+#
+#     def _store_beta_forecast_results(self, analysis, output_dir):
+#         """Store Beta-Forecast results in database"""
+#         # Look for beta forecast output files
+#         result_files = list(output_dir.glob('*beta_forecast*.csv'))
+#         if not result_files:
+#             result_files = list(output_dir.glob('*forecast*.csv'))
+#
+#         if not result_files:
+#             logger.warning(f"No beta forecast results found in {output_dir}")
+#             return
+#
+#         latest_file = max(result_files, key=lambda p: p.stat().st_mtime)
+#         df = pd.read_csv(latest_file)
+#
+#         # Store results (adapt based on actual output format)
+#         for _, row in df.iterrows():
+#             BetaForecastResult.objects.create(
+#                 analysis_result=analysis,
+#                 forecast_date=pd.to_datetime(row.get('forecast_date', timezone.now().date())).date(),
+#                 ticker=row.get('ticker', ''),
+#                 beta_pred=float(row.get('beta_pred', 0)),
+#                 beta_pred_ema=float(row.get('beta_pred_ema', 0)),
+#                 lo=float(row.get('lo', 0)),
+#                 hi=float(row.get('hi', 0)),
+#                 r2_ols=float(row.get('r2_ols', 0)),
+#                 p_value=float(row.get('p_value', 0)),
+#                 confidence_level=row.get('confidence_level', 'Medium (p≤5%)'),
+#                 confidence_tier=row.get('confidence_tier', 'Tier-2'),
+#                 delta_beta_20d=float(row.get('delta_beta_20d', 0)),
+#                 conf_20d=float(row.get('conf_20d', 0)),
+#                 agree_adjacent=bool(row.get('agree_adjacent', False)),
+#                 term_unstable=bool(row.get('term_unstable', False)),
+#                 action=row.get('action', 'hold'),
+#                 hold_reason=row.get('hold_reason', '')
+#             )
+#
+#     def _extract_tickers_from_upload(self, upload):
+#         """Extract ticker list from uploaded file"""
+#         # Mock implementation - adapt based on actual file structure
+#         return ['AAPL', 'MSFT', 'GOOGL']
+#
+#     def _count_tickers_in_upload(self, upload):
+#         """Count tickers in uploaded file"""
+#         return len(self._extract_tickers_from_upload(upload))
+#
+#
+# class UnifiedAnalysisResultView(APIView):
+#     """Get unified analysis results for a specific ticker and model"""
+#     permission_classes = [IsAuthenticated]
+#
+#     def get(self, request, ticker, model_type):
+#         """Get analysis result for specific ticker and model type"""
+#         try:
+#             if model_type == 'mean-reversion':
+#                 results = MeanReversionResult.objects.filter(
+#                     analysis_result__user=request.user,
+#                     ticker=ticker.upper()
+#                 ).order_by('-analysis_date').first()
+#
+#                 if not results:
+#                     return Response({'error': 'No mean-reversion results found'}, status=404)
+#
+#                 serializer = MeanReversionResultSerializer(results)
+#                 return Response({
+#                     'analysis_id': str(results.analysis_result.id),
+#                     'model_type': 'mean-reversion',
+#                     'ticker': ticker.upper(),
+#                     'name': f"{ticker.upper()} Inc.",  # Mock - could be enhanced with company name lookup
+#                     'analysis_date': results.analysis_date,
+#                     'recommendation': results.recommendation,
+#                     'confidence': results.recommendation_confidence,
+#                     'model_data': serializer.data
+#                 })
+#
+#             elif model_type == 'beta-forecasting':
+#                 results = BetaForecastResult.objects.filter(
+#                     analysis_result__user=request.user,
+#                     ticker=ticker.upper()
+#                 ).order_by('-forecast_date').first()
+#
+#                 if not results:
+#                     return Response({'error': 'No beta forecast results found'}, status=404)
+#
+#                 serializer = BetaForecastResultSerializer(results)
+#
+#                 # Map action to recommendation
+#                 action_to_recommendation = {
+#                     'chase': 'BUY',
+#                     'fade': 'SELL',
+#                     'hold': 'HOLD'
+#                 }
+#
+#                 return Response({
+#                     'analysis_id': str(results.analysis_result.id),
+#                     'model_type': 'beta-forecasting',
+#                     'ticker': ticker.upper(),
+#                     'name': f"{ticker.upper()} Inc.",  # Mock - could be enhanced
+#                     'analysis_date': results.forecast_date,
+#                     'recommendation': action_to_recommendation.get(results.action, 'HOLD'),
+#                     'confidence': results.conf_20d,
+#                     'model_data': serializer.data
+#                 })
+#
+#             else:
+#                 return Response({'error': 'Invalid model type'}, status=400)
+#
+#         except Exception as e:
+#             logger.error(f"Error retrieving unified analysis result: {str(e)}")
+#             return Response({'error': str(e)}, status=500)
+#
+#
+# class ModelComparisonView(APIView):
+#     """Compare both models for a specific ticker"""
+#     permission_classes = [IsAuthenticated]
+#
+#     def get(self, request, ticker):
+#         """Compare both Mean-Reversion and Beta-Forecasting for a ticker"""
+#         try:
+#             # Get both results
+#             mr_view = UnifiedAnalysisResultView()
+#             mr_request = request._request if hasattr(request, '_request') else request
+#             mr_response = mr_view.get(mr_request, ticker, 'mean-reversion')
+#
+#             beta_response = mr_view.get(mr_request, ticker, 'beta-forecasting')
+#
+#             if mr_response.status_code != 200 or beta_response.status_code != 200:
+#                 return Response({'error': 'Results not found for both models'}, status=404)
+#
+#             mr_data = mr_response.data
+#             beta_data = beta_response.data
+#
+#             # Compare recommendations
+#             mr_recommendation = mr_data['recommendation']
+#             beta_recommendation = beta_data['recommendation']
+#
+#             if mr_recommendation == beta_recommendation:
+#                 agreement = "Strong"
+#                 primary_recommendation = mr_recommendation
+#                 confidence_score = max(mr_data['confidence'], beta_data['confidence'])
+#             else:
+#                 agreement = "Conflicting"
+#                 # Use beta model as primary when conflicting (higher confidence generally)
+#                 if beta_data['confidence'] > mr_data['confidence']:
+#                     primary_recommendation = beta_recommendation
+#                     confidence_score = beta_data['confidence']
+#                 else:
+#                     primary_recommendation = mr_recommendation
+#                     confidence_score = mr_data['confidence']
+#
+#             return Response({
+#                 'mean_reversion': mr_data,
+#                 'beta_forecasting': beta_data,
+#                 'comparison': {
+#                     'agreement': agreement,
+#                     'primary_recommendation': primary_recommendation,
+#                     'confidence_score': confidence_score
+#                 }
+#             })
+#
+#         except Exception as e:
+#             logger.error(f"Error in model comparison: {str(e)}")
+#             return Response({'error': str(e)}, status=500)
+#
+#
+# # ================= Beta Coefficient Model Output API Views ================= #
+#
+# class BetaRealizedListView(APIView):
+#     """API endpoint for beta realized data from betas_20d.csv"""
+#
+#     def get(self, request):
+#         from .models import BetaRealized
+#         from .serializers import BetaRealizedSerializer
+#
+#         ticker = request.query_params.get('ticker')
+#         start_date = request.query_params.get('start_date')
+#         end_date = request.query_params.get('end_date')
+#
+#         queryset = BetaRealized.objects.all()
+#
+#         if ticker:
+#             queryset = queryset.filter(ticker=ticker)
+#         if start_date:
+#             queryset = queryset.filter(date__gte=start_date)
+#         if end_date:
+#             queryset = queryset.filter(date__lte=end_date)
+#
+#         queryset = queryset.order_by('-date', 'ticker')[:1000]  # Limit results
+#
+#         serializer = BetaRealizedSerializer(queryset, many=True)
+#         return Response({
+#             'count': queryset.count(),
+#             'results': serializer.data
+#         })
+#
+#
+# class ForecastEvaluationListView(APIView):
+#     """API endpoint for forecast evaluation data from forecast_eval_20d.csv"""
+#
+#     def get(self, request):
+#         from .models import ForecastEvaluation
+#         from .serializers import ForecastEvaluationSerializer
+#
+#         ticker = request.query_params.get('ticker')
+#         start_date = request.query_params.get('start_date')
+#         end_date = request.query_params.get('end_date')
+#         min_significance = request.query_params.get('min_significance', 0.7)
+#
+#         queryset = ForecastEvaluation.objects.all()
+#
+#         if ticker:
+#             queryset = queryset.filter(ticker=ticker)
+#         if start_date:
+#             queryset = queryset.filter(date__gte=start_date)
+#         if end_date:
+#             queryset = queryset.filter(date__lte=end_date)
+#
+#         queryset = queryset.filter(significance_score__gte=float(min_significance))
+#         queryset = queryset.order_by('-date', 'ticker')[:1000]
+#
+#         serializer = ForecastEvaluationSerializer(queryset, many=True)
+#         return Response({
+#             'count': queryset.count(),
+#             'results': serializer.data
+#         })
+#
+#
+# class BetaCoefficientSummaryView(APIView):
+#     """Summary statistics for beta coefficient predictions"""
+#
+#     def get(self, request):
+#         from .models import ForecastEvaluation
+#         from django.db.models import Avg, Count, Max
+#
+#         # Get summary by ticker
+#         summary_data = []
+#
+#         for ticker_data in ForecastEvaluation.objects.values('ticker').annotate(
+#             forecast_count=Count('id'),
+#             avg_r2=Avg('r2_ols'),
+#             latest_date=Max('date')
+#         ).order_by('-forecast_count'):
+#
+#             ticker = ticker_data['ticker']
+#             latest_record = ForecastEvaluation.objects.filter(
+#                 ticker=ticker,
+#                 date=ticker_data['latest_date']
+#             ).first()
+#
+#             if latest_record:
+#                 # Calculate prediction accuracy (simplified)
+#                 prediction_error = abs(latest_record.beta_pred - latest_record.beta_true) if latest_record.beta_true else None
+#                 accuracy = 1 - min(prediction_error, 1.0) if prediction_error is not None else None
+#
+#                 confidence_level = 'High' if latest_record.significance_score > 0.8 else 'Medium' if latest_record.significance_score > 0.6 else 'Low'
+#
+#                 summary_data.append({
+#                     'ticker': ticker,
+#                     'latest_date': latest_record.date,
+#                     'latest_beta_pred': latest_record.beta_pred,
+#                     'latest_beta_true': latest_record.beta_true,
+#                     'avg_r2_ols': ticker_data['avg_r2'],
+#                     'prediction_accuracy': accuracy,
+#                     'forecast_count': ticker_data['forecast_count'],
+#                     'confidence_level': confidence_level
+#                 })
+#
+#         return Response({
+#             'summary': summary_data[:50]  # Top 50 tickers
+#         })
+#
+#
+# class BetaCoefficientTimeSeriesView(APIView):
+#     """Time series data for a specific ticker's beta coefficient predictions"""
+#
+#     def get(self, request, ticker):
+#         from .models import ForecastEvaluation
+#
+#         queryset = ForecastEvaluation.objects.filter(
+#             ticker=ticker
+#         ).order_by('date')
+#
+#         dates = []
+#         beta_pred = []
+#         beta_true = []
+#         confidence_bands = []
+#
+#         for record in queryset:
+#             dates.append(record.date)
+#             beta_pred.append(record.beta_pred)
+#             beta_true.append(record.beta_true)
+#
+#             # Calculate confidence bands using the band value
+#             confidence_bands.append({
+#                 'lower': record.beta_pred - record.band,
+#                 'upper': record.beta_pred + record.band
+#             })
+#
+#         return Response({
+#             'ticker': ticker,
+#             'dates': dates,
+#             'beta_pred': beta_pred,
+#             'beta_true': beta_true,
+#             'confidence_bands': confidence_bands
+#         })
+#
+#
+# class ImportBetaDataView(APIView):
+#     """Import beta coefficient data from CSV files"""
+#     permission_classes = [IsAuthenticated]
+#
+#     def post(self, request):
+#         from .models import BetaRealized, ForecastEvaluation
+#         import csv
+#         from django.conf import settings
+#
+#         try:
+#             # Import betas_20d.csv
+#             betas_file = os.path.join(settings.BASE_DIR.parent, 'outputs', 'betas_20d.csv')
+#             if os.path.exists(betas_file):
+#                 with open(betas_file, 'r') as f:
+#                     reader = csv.DictReader(f)
+#                     beta_objects = []
+#
+#                     for row in reader:
+#                         if row['Date'] and row['ticker']:  # Skip empty rows
+#                             try:
+#                                 beta_obj = BetaRealized(
+#                                     date=datetime.strptime(row['Date'], '%m/%d/%Y').date(),
+#                                     ticker=row['ticker'],
+#                                     beta_realised=float(row['beta_realised']) if row['beta_realised'] else None,
+#                                     r2_ols_x=float(row['r2_ols_x']) if row['r2_ols_x'] else None,
+#                                     r2_ols_y=float(row['r2_ols_y']) if row['r2_ols_y'] else None,
+#                                     p_value=float(row['p_value']) if row['p_value'] else None,
+#                                     significance_score=float(row['significance_score']) if row['significance_score'] else None,
+#                                     beta_pred=float(row['beta_pred']) if row['beta_pred'] else None,
+#                                     beta_true=float(row['beta_true']) if row['beta_true'] else None,
+#                                     band=float(row['band']) if row['band'] else None,
+#                                     lo=float(row['lo']) if row['lo'] else None,
+#                                     hi=float(row['hi']) if row['hi'] else None,
+#                                 )
+#                                 beta_objects.append(beta_obj)
+#                             except (ValueError, KeyError) as e:
+#                                 continue  # Skip invalid rows
+#
+#                     # Bulk create with ignore conflicts
+#                     BetaRealized.objects.bulk_create(beta_objects, ignore_conflicts=True, batch_size=1000)
+#
+#             # Import forecast_eval_20d.csv
+#             forecast_file = os.path.join(settings.BASE_DIR.parent, 'outputs', 'forecast_eval_20d.csv')
+#             if os.path.exists(forecast_file):
+#                 with open(forecast_file, 'r') as f:
+#                     reader = csv.DictReader(f)
+#                     forecast_objects = []
+#
+#                     for row in reader:
+#                         try:
+#                             forecast_obj = ForecastEvaluation(
+#                                 date=datetime.strptime(row['Date'], '%m/%d/%Y').date(),
+#                                 ticker=row['ticker'],
+#                                 r2_ols=float(row['r2_ols']),
+#                                 p_value=float(row['p_value']),
+#                                 significance_score=float(row['significance_score']),
+#                                 beta_pred=float(row['beta_pred']),
+#                                 beta_true=float(row['beta_true']),
+#                                 band=float(row['band']),
+#                             )
+#                             forecast_objects.append(forecast_obj)
+#                         except (ValueError, KeyError) as e:
+#                             continue
+#
+#                     ForecastEvaluation.objects.bulk_create(forecast_objects, ignore_conflicts=True, batch_size=1000)
+#
+#             return Response({
+#                 'message': 'Beta coefficient data imported successfully',
+#                 'beta_records': BetaRealized.objects.count(),
+#                 'forecast_records': ForecastEvaluation.objects.count()
+#             })
+#
+#         except Exception as e:
+#             logger.error(f"Error importing beta data: {str(e)}")
+#             return Response({'error': str(e)}, status=500)

@@ -39,6 +39,14 @@ export function BetaDashboard() {
   const [timeSeriesLoading, setTimeSeriesLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [sharedStats, setSharedStats] = useState<any | null>(null);
+
+  useEffect(() => {
+      fetch(`${API_BASE}/api/factors/shared/`)
+        .then(res => res.json())
+        .then(setSharedStats)
+        .catch(() => {});
+    }, []);
 
   // API base URL - adjust based on your backend configuration
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -46,9 +54,9 @@ export function BetaDashboard() {
   const fetchSummaryData = async () => {
     setLoading(true);
     setError('');
-    
+
     try {
-      const response = await fetch(`${API_BASE}/api/beta/summary/`, {
+      const response = await fetch(`${API_BASE}/api/factors/summary/`, {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
@@ -72,9 +80,9 @@ export function BetaDashboard() {
 
   const fetchTimeSeriesData = async (ticker: string) => {
     if (!ticker) return;
-    
+
     setTimeSeriesLoading(true);
-    
+
     try {
       const response = await fetch(`${API_BASE}/api/beta/timeseries/${ticker}/`, {
         credentials: 'include',
@@ -120,10 +128,10 @@ export function BetaDashboard() {
       }
 
       const result = await response.json();
-      
+
       // Refresh summary data after import
       await fetchSummaryData();
-      
+
       // Show success message (you might want to use a toast notification here)
       console.log('Import successful:', result);
     } catch (err) {
@@ -154,25 +162,6 @@ export function BetaDashboard() {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={fetchSummaryData}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button
-            onClick={handleImportData}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Import Latest Data
-          </Button>
-        </div>
       </div>
 
       {/* Error Alert */}
@@ -182,7 +171,104 @@ export function BetaDashboard() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+        {/* Global Factor Stats Cards */}
+        {sharedStats && (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {/* Global R² */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Global R² Score</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {sharedStats.r2_global?.toFixed(4) ?? "N/A"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Model fit quality across all tickers
+                </p>
+              </CardContent>
+            </Card>
 
+            {/* Volatility Coefficient */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Volatility Coefficient</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {sharedStats.volatility_coeff?.toFixed(4) ?? "N/A"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  ElasticNet intercept term for volatility
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {sharedStats.y_intercept?.toFixed(3) ?? "N/A"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Model baseline term (average intercept across all tickers)
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Strongest Positive Coefficient */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Top Positive Factor</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const coefs = Object.entries(sharedStats)
+                    .filter(([k]) => k.startsWith("coef_") && sharedStats[k] !== null)
+                    .sort((a, b) => b[1] - a[1]);
+                  const top = coefs[0];
+                  return top ? (
+                    <>
+                      <div className="text-2xl font-bold">{top[0].replace("coef_", "")}</div>
+                      <p className="text-xs text-muted-foreground">
+                        Weight: {top[1].toFixed(4)}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="text-sm text-gray-500">N/A</div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+
+            {/* Strongest Negative Coefficient */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Top Negative Factor</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const coefs = Object.entries(sharedStats)
+                    .filter(([k]) => k.startsWith("coef_") && sharedStats[k] !== null)
+                    .sort((a, b) => a[1] - b[1]);
+                  const bottom = coefs[0];
+                  return bottom ? (
+                    <>
+                      <div className="text-2xl font-bold">{bottom[0].replace("coef_", "")}</div>
+                      <p className="text-xs text-muted-foreground">
+                        Weight: {bottom[1].toFixed(4)}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="text-sm text-gray-500">N/A</div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </div>
+        )}
       {/* Main Content */}
       <Tabs defaultValue="summary" className="space-y-4">
         <TabsList>
@@ -223,65 +309,6 @@ export function BetaDashboard() {
           )}
         </TabsContent>
       </Tabs>
-
-      {/* Stats Cards */}
-      {summaryData.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total Stocks</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{summaryData.length}</div>
-              <p className="text-xs text-muted-foreground">
-                Active predictions
-              </p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">High Confidence</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {summaryData.filter(s => s.confidence_level === 'High').length}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Strong predictions
-              </p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Avg R² Score</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {(summaryData.reduce((sum, s) => sum + s.avg_r2_ols, 0) / summaryData.length).toFixed(3)}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Model fit quality
-              </p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total Forecasts</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {summaryData.reduce((sum, s) => sum + s.forecast_count, 0).toLocaleString()}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Historical predictions
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }

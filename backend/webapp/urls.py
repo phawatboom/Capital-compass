@@ -1,8 +1,6 @@
 from django.urls import path
 from django.conf.urls.static import static
 from django.conf import settings
-from .views import analyze_upload
-
 
 from .views import (
     FileUploadView,
@@ -19,16 +17,20 @@ from .views import (
     profile_view,
     profile_avatar,
     change_password,
+    factor_shared,
+    factor_summary,
+    analyze_upload,
+    beta_timeseries,
     # Dual-model architecture views
-    UnifiedAnalysisView,
-    UnifiedAnalysisResultView,
-    ModelComparisonView,
+    #UnifiedAnalysisView,
+    #UnifiedAnalysisResultView,
+    #ModelComparisonView,
     # Beta coefficient model output views
-    BetaRealizedListView,
-    ForecastEvaluationListView,
-    BetaCoefficientSummaryView,
-    BetaCoefficientTimeSeriesView,
-    ImportBetaDataView,
+    #BetaRealizedListView,
+    #ForecastEvaluationListView,
+    #BetaCoefficientSummaryView,
+    #BetaCoefficientTimeSeriesView,
+    #ImportBetaDataView,
 )
 
 # Universal model imports
@@ -73,17 +75,10 @@ urlpatterns = [
     # Model analysis
     path('csv-uploads/<int:pk>/analyze/', analyze_upload, name='analyze-upload'),
     
-    # Unified analysis endpoints
-    path('analysis/unified/', UnifiedAnalysisView.as_view(), name='unified-analysis'),
-    path('analysis/<str:ticker>/<str:model_type>/', UnifiedAnalysisResultView.as_view(), name='unified-analysis-result'),
-    path('analysis/<str:ticker>/compare/', ModelComparisonView.as_view(), name='model-comparison'),
-    
-    # Beta coefficient model output endpoints
-    path('beta/realized/', BetaRealizedListView.as_view(), name='beta-realized-list'),
-    path('beta/forecast-evaluation/', ForecastEvaluationListView.as_view(), name='forecast-evaluation-list'),
-    path('beta/summary/', BetaCoefficientSummaryView.as_view(), name='beta-summary'),
-    path('beta/timeseries/<str:ticker>/', BetaCoefficientTimeSeriesView.as_view(), name='beta-timeseries'),
-    path('beta/import/', ImportBetaDataView.as_view(), name='import-beta-data'),
+    # Trey's factor endpoints (from his implementation)
+    path("factors/summary/", factor_summary, name="factor-summary"),
+    path("factors/shared/", factor_shared, name="factor-shared"),
+    path("beta/timeseries/<str:ticker>/", beta_timeseries, name="beta_timeseries"),
     
     # Universal Beta Model endpoints (PRIMARY for client use)
     path('universal/import/', ImportUniversalDataView.as_view(), name='universal-import'),
