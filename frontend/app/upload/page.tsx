@@ -11,7 +11,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import ModelSelectionCard from "@/components/ModelSelectionCard";
 import type { ModelType } from "@/types/analysis";
-import {format} from "node:url";
 
 /**
  * Configure your API base:
