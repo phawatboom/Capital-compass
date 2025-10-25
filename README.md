@@ -80,36 +80,11 @@ pnpm run dev
 
 #### 4. Access Application
 - **Frontend**: http://localhost:3000
-
+- 
 ### 📖 Deployment Guide
 
 For detailed production deployment instructions, see **[readme-files/DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**
 
-
-
-## 📊 Beta Coefficient Integration
-
-### Model Outputs
-The system processes two main CSV output files:
-
-1. **`betas_20d.csv`**: Historical beta realizations with predictions
-2. **`forecast_eval_20d.csv`**: Forecast evaluation and performance metrics
-
-### API Endpoints
-
-#### Beta Data Endpoints
-```
-GET  /api/beta/summary/              # Summary statistics by ticker
-GET  /api/beta/realized/             # Beta realization data
-GET  /api/beta/forecast-evaluation/  # Forecast performance data
-GET  /api/beta/timeseries/{ticker}/  # Time series for specific ticker
-POST /api/beta/import/               # Import model outputs
-```
-
-#### Query Parameters
-- `ticker`: Filter by stock ticker
-- `start_date`, `end_date`: Date range filtering
-- `min_significance`: Minimum significance threshold
 
 ### Database Import
 
