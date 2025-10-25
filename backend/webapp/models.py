@@ -424,6 +424,231 @@ class StockFactorResult(models.Model):
     def __str__(self):
         return f"{self.ticker} @ {self.created_at:%Y-%m-%d}"
 
+# New Models for Pooled Model Outputs
+class AnalysisRun(models.Model):
+    """Represents a complete analysis run with pooled model outputs"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='analysis_runs')
+    csv_upload = models.ForeignKey(CSVUploadRecord, on_delete=models.CASCADE, null=True, blank=True)
+    
+    # Run metadata
+    run_name = models.CharField(max_length=100)
+    model_type = models.CharField(max_length=50, default='pooled_enet')
+    horizon_days = models.IntegerField(default=10)  # 10d, 20d, etc.
+    created_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('running', 'Running'),
+            ('completed', 'Completed'),
+            ('failed', 'Failed'),
+        ],
+        default='running'
+    )
+    
+    # Overall model performance metrics (from oos_metrics.csv)
+    mae = models.FloatField(null=True, blank=True, help_text="Mean Absolute Error")
+    rmse = models.FloatField(null=True, blank=True, help_text="Root Mean Square Error")
+    directional_accuracy = models.FloatField(null=True, blank=True, help_text="Directional Accuracy")
+    sample_size = models.IntegerField(null=True, blank=True, help_text="Total observations")
+    r2_global = models.FloatField(null=True, blank=True, help_text="Global R-squared")
+    r2_fold_mean = models.FloatField(null=True, blank=True, help_text="Mean R-squared across folds")
+    r2_fold_weighted = models.FloatField(null=True, blank=True, help_text="Weighted R-squared across folds")
+    mae_ratio_global = models.FloatField(null=True, blank=True, help_text="Global MAE ratio")
+    mae_ratio_fold_mean = models.FloatField(null=True, blank=True, help_text="Mean MAE ratio across folds")
+    mae_ratio_fold_weighted = models.FloatField(null=True, blank=True, help_text="Weighted MAE ratio across folds")
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['status']),
+            models.Index(fields=['model_type', 'horizon_days']),
+        ]
+    
+    def __str__(self):
+        return f"{self.run_name} ({self.model_type}_{self.horizon_days}d) - {self.status}"
+
+class ModelCoefficient(models.Model):
+    """Stores the learned coefficients from the pooled ElasticNet model (from enet_coefficients.csv)"""
+    analysis_run = models.ForeignKey(AnalysisRun, on_delete=models.CASCADE, related_name='coefficients')
+    feature_name = models.CharField(max_length=100)
+    coefficient_value = models.FloatField()
+    
+    class Meta:
+        unique_together = ('analysis_run', 'feature_name')
+        indexes = [
+            models.Index(fields=['analysis_run', 'feature_name']),
+        ]
+    
+    def __str__(self):
+        return f"{self.analysis_run.run_name}: {self.feature_name} = {self.coefficient_value:.6f}"
+
+class StockPrediction(models.Model):
+    """Stores per-stock predictions and features (from final_predictions.csv)"""
+    analysis_run = models.ForeignKey(AnalysisRun, on_delete=models.CASCADE, related_name='predictions')
+    ticker = models.CharField(max_length=20)
+    prediction_date = models.DateField()
+    
+    # Core prediction
+    final_prediction = models.FloatField(help_text="Model's final prediction")
+    
+    # Beta features
+    train_b = models.FloatField(null=True, blank=True)
+    lag_train_b = models.FloatField(null=True, blank=True)
+    
+    # Autocorrelation features
+    ar1_corr_10d = models.FloatField(null=True, blank=True)
+    ar1_corr_20d = models.FloatField(null=True, blank=True)
+    ar1_corr_60d = models.FloatField(null=True, blank=True)
+    
+    # Persistence features
+    sign_persist_20d = models.FloatField(null=True, blank=True)
+    sign_persist_60d = models.FloatField(null=True, blank=True)
+    
+    # Return features
+    ret_1d = models.FloatField(null=True, blank=True)
+    ret_5d = models.FloatField(null=True, blank=True)
+    ret_20d = models.FloatField(null=True, blank=True)
+    
+    # Volatility features
+    vol_63d = models.FloatField(null=True, blank=True)
+    vol_126d = models.FloatField(null=True, blank=True)
+    vol_252d = models.FloatField(null=True, blank=True)
+    vol_756d = models.FloatField(null=True, blank=True)
+    
+    # Technical indicators
+    z_ma_20d = models.FloatField(null=True, blank=True)
+    
+    # Cross-sectional ranks
+    cs_rank_ret_1d = models.FloatField(null=True, blank=True)
+    cs_rank_ret_5d = models.FloatField(null=True, blank=True)
+    cs_rank_ret_20d = models.FloatField(null=True, blank=True)
+    cs_rank_z_ma_20d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_63d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_126d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_252d = models.FloatField(null=True, blank=True)
+    cs_rank_vol_756d = models.FloatField(null=True, blank=True)
+    
+    # Cross-sectional dispersion
+    xsec_disp_30d = models.FloatField(null=True, blank=True)
+    
+    # Coefficient-weighted features (coeff_* columns)
+    coeff_train_b = models.FloatField(null=True, blank=True)
+    coeff_lag_train_b = models.FloatField(null=True, blank=True)
+    coeff_ar1_corr_10d = models.FloatField(null=True, blank=True)
+    coeff_ar1_corr_20d = models.FloatField(null=True, blank=True)
+    coeff_ar1_corr_60d = models.FloatField(null=True, blank=True)
+    coeff_sign_persist_20d = models.FloatField(null=True, blank=True)
+    coeff_sign_persist_60d = models.FloatField(null=True, blank=True)
+    coeff_ret_1d = models.FloatField(null=True, blank=True)
+    coeff_ret_5d = models.FloatField(null=True, blank=True)
+    coeff_ret_20d = models.FloatField(null=True, blank=True)
+    coeff_vol_63d = models.FloatField(null=True, blank=True)
+    coeff_vol_126d = models.FloatField(null=True, blank=True)
+    coeff_vol_252d = models.FloatField(null=True, blank=True)
+    coeff_vol_756d = models.FloatField(null=True, blank=True)
+    coeff_z_ma_20d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_ret_1d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_ret_5d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_ret_20d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_z_ma_20d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_vol_63d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_vol_126d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_vol_252d = models.FloatField(null=True, blank=True)
+    coeff_cs_rank_vol_756d = models.FloatField(null=True, blank=True)
+    coeff_xsec_disp_30d = models.FloatField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('analysis_run', 'ticker', 'prediction_date')
+        indexes = [
+            models.Index(fields=['analysis_run', 'ticker']),
+            models.Index(fields=['prediction_date']),
+            models.Index(fields=['final_prediction']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} {self.prediction_date}: {self.final_prediction:.6f}"
+
+class StockPerformanceMetrics(models.Model):
+    """Stores per-stock out-of-sample performance metrics (from per_stock_oos_metrics.csv)"""
+    analysis_run = models.ForeignKey(AnalysisRun, on_delete=models.CASCADE, related_name='stock_metrics')
+    ticker = models.CharField(max_length=20)
+    
+    # Performance metrics
+    r2_oos = models.FloatField(help_text="Out-of-sample R-squared")
+    rmse_oos = models.FloatField(help_text="Out-of-sample RMSE")
+    mae_oos = models.FloatField(help_text="Out-of-sample MAE")
+    mase_oos = models.FloatField(help_text="Mean Absolute Scaled Error")
+    dir_acc_oos = models.FloatField(help_text="Directional accuracy out-of-sample")
+    pred_std_oos = models.FloatField(help_text="Standard deviation of predictions")
+    n_obs_oos = models.IntegerField(help_text="Number of out-of-sample observations")
+    
+    class Meta:
+        unique_together = ('analysis_run', 'ticker')
+        indexes = [
+            models.Index(fields=['analysis_run', 'ticker']),
+            models.Index(fields=['r2_oos']),
+            models.Index(fields=['dir_acc_oos']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} (Run {self.analysis_run.id}): R²={self.r2_oos:.3f}, Acc={self.dir_acc_oos:.3f}"
+
+class OutOfSamplePrediction(models.Model):
+    """Stores detailed out-of-sample predictions (from oos_predictions.csv)"""
+    analysis_run = models.ForeignKey(AnalysisRun, on_delete=models.CASCADE, related_name='oos_predictions')
+    ticker = models.CharField(max_length=20)
+    date = models.DateField()
+    
+    # Predictions and actuals
+    y_pred = models.FloatField(help_text="Model prediction")
+    y_actual = models.FloatField(null=True, blank=True, help_text="Actual outcome")
+    prediction_error = models.FloatField(null=True, blank=True, help_text="y_actual - y_pred")
+    abs_error = models.FloatField(null=True, blank=True, help_text="Absolute prediction error")
+    squared_error = models.FloatField(null=True, blank=True, help_text="Squared prediction error")
+    
+    # Additional features if available in oos_predictions.csv
+    fold_id = models.IntegerField(null=True, blank=True, help_text="Cross-validation fold")
+    
+    class Meta:
+        unique_together = ('analysis_run', 'ticker', 'date')
+        indexes = [
+            models.Index(fields=['analysis_run', 'ticker', 'date']),
+            models.Index(fields=['date']),
+            models.Index(fields=['abs_error']),
+        ]
+    
+    def __str__(self):
+        return f"{self.ticker} {self.date}: pred={self.y_pred:.4f}, actual={self.y_actual:.4f if self.y_actual else 'N/A'}"
+
+class FoldStatistics(models.Model):
+    """Stores cross-validation fold statistics (from oos_fold_stats.csv)"""
+    analysis_run = models.ForeignKey(AnalysisRun, on_delete=models.CASCADE, related_name='fold_stats')
+    fold_id = models.IntegerField()
+    
+    # Fold-specific metrics
+    fold_r2 = models.FloatField(null=True, blank=True, help_text="R-squared for this fold")
+    fold_mae = models.FloatField(null=True, blank=True, help_text="MAE for this fold")
+    fold_rmse = models.FloatField(null=True, blank=True, help_text="RMSE for this fold")
+    fold_directional_acc = models.FloatField(null=True, blank=True, help_text="Directional accuracy for this fold")
+    fold_n_obs = models.IntegerField(null=True, blank=True, help_text="Number of observations in fold")
+    
+    # Training/validation split info
+    train_start_date = models.DateField(null=True, blank=True)
+    train_end_date = models.DateField(null=True, blank=True)
+    val_start_date = models.DateField(null=True, blank=True)
+    val_end_date = models.DateField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ('analysis_run', 'fold_id')
+        indexes = [
+            models.Index(fields=['analysis_run', 'fold_id']),
+            models.Index(fields=['fold_r2']),
+        ]
+    
+    def __str__(self):
+        return f"Fold {self.fold_id} (Run {self.analysis_run.id}): R²={self.fold_r2:.3f if self.fold_r2 else 'N/A'}"
+
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:

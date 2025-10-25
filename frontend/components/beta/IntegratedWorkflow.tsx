@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ interface IntegratedWorkflowProps {
 }
 
 export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflowProps) {
+  const router = useRouter();
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'uploaded' | 'processing' | 'completed' | 'error'>('idle');
   const [clientId, setClientId] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -227,6 +229,11 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
           }
           if (onResultsReady) {
             onResultsReady(clientId);
+          } else {
+            // Auto-navigate to dashboard after a short delay
+            setTimeout(() => {
+              navigateToDashboard();
+            }, 2000);
           }
         } else if (result.data.status === 'failed') {
           setUploadState('error');
@@ -260,6 +267,11 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
         setStatusInterval(null);
       }
     }
+  };
+
+  const navigateToDashboard = () => {
+    // Navigate to My Data page with dashboard tab active
+    router.push('/dashboard/my-data?tab=dashboard');
   };
 
   const getStatusIcon = () => {
@@ -813,7 +825,13 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
               
               <div className="flex gap-3">
                 <Button 
-                  onClick={() => onResultsReady && onResultsReady(clientId)}
+                  onClick={() => {
+                    if (onResultsReady) {
+                      onResultsReady(clientId);
+                    } else {
+                      navigateToDashboard();
+                    }
+                  }}
                   className="flex-1"
                 >
                   <BarChart3 className="mr-2 h-4 w-4" />

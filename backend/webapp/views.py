@@ -17,8 +17,6 @@ import logging # <-- Add logging
 
 from django.db.models import Avg
 
-from .model_runner import run_analysis_from_web
-
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
@@ -30,7 +28,8 @@ from django.http import FileResponse, JsonResponse
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from rest_framework import status
+from rest_framework import status, generics, viewsets
+from rest_framework.decorators import action
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, AllowAny
 from rest_framework.response import Response
@@ -1024,11 +1023,15 @@ def change_password(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def analyze_upload(request, pk: int):
+    """Legacy analyze endpoint - replaced by integrated workflow"""
     try:
-        result = run_analysis_from_web(upload_pk=pk, model_for_pred="enet")
-        if not result.get("ok"):
-            raise RuntimeError(result.get("error", "Unknown error"))
-        return Response(result, status=status.HTTP_200_OK)
+        # This endpoint has been replaced by the integrated workflow
+        # /api/integrated/upload/ -> /api/integrated/run-model/
+        return Response({
+            "ok": False, 
+            "error": "This endpoint has been replaced by the integrated workflow. Please use /api/integrated/upload/ and /api/integrated/run-model/",
+            "redirect": "/api/integrated/upload/"
+        }, status=status.HTTP_410_GONE)
     except Exception as e:
         return Response({"ok": False, "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1967,3 +1970,435 @@ def analyze_csv(request, pk):
 #         except Exception as e:
 #             logger.error(f"Error importing beta data: {str(e)}")
 #             return Response({'error': str(e)}, status=500)
+
+
+# Pooled Model Output API Views
+from .serializers import (
+    AnalysisRunSerializer, AnalysisRunDetailSerializer, DashboardSummarySerializer,
+    StockPredictionSerializer, StockPerformanceMetricsSerializer, OutOfSamplePredictionSerializer,
+    ModelCoefficientSerializer, FoldStatisticsSerializer, StockAnalysisSerializer,
+    TimeSeriesAnalysisSerializer, PredictionDistributionSerializer
+)
+from .models import AnalysisRun, ModelCoefficient, StockPrediction, StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics
+from django.db.models import Q, Count, Avg, Max, Min
+from rest_framework import generics, viewsets
+from rest_framework.decorators import action
+from django.utils.dateparse import parse_date
+
+
+class AnalysisRunViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing analysis runs"""
+    serializer_class = AnalysisRunSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return AnalysisRun.objects.filter(user=self.request.user).order_by('-created_at')
+    
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return AnalysisRunDetailSerializer
+        return AnalysisRunSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+    
+    @action(detail=True, methods=['get'])
+    def predictions(self, request, pk=None):
+        """Get all predictions for this analysis run"""
+        analysis_run = self.get_object()
+        predictions = analysis_run.predictions.all()
+        
+        # Filter by ticker if provided
+        ticker = request.query_params.get('ticker')
+        if ticker:
+            predictions = predictions.filter(ticker__icontains=ticker)
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 50))
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        paginated_predictions = predictions[start:end]
+        serializer = StockPredictionSerializer(paginated_predictions, many=True)
+        
+        return Response({
+            'results': serializer.data,
+            'total': predictions.count(),
+            'page': page,
+            'page_size': page_size
+        })
+    
+    @action(detail=True, methods=['get'])
+    def performance(self, request, pk=None):
+        """Get performance metrics for this analysis run"""
+        analysis_run = self.get_object()
+        metrics = analysis_run.stock_metrics.all()
+        
+        # Filter by ticker if provided
+        ticker = request.query_params.get('ticker')
+        if ticker:
+            metrics = metrics.filter(ticker__icontains=ticker)
+        
+        serializer = StockPerformanceMetricsSerializer(metrics, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def coefficients(self, request, pk=None):
+        """Get model coefficients for this analysis run"""
+        analysis_run = self.get_object()
+        coefficients = analysis_run.coefficients.all().order_by('-coefficient_value')
+        serializer = ModelCoefficientSerializer(coefficients, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def summary(self, request, pk=None):
+        """Get comprehensive summary for this analysis run"""
+        analysis_run = self.get_object()
+        
+        # Basic stats
+        predictions_count = analysis_run.predictions.count()
+        stocks_count = analysis_run.predictions.values('ticker').distinct().count()
+        
+        # Performance aggregates
+        avg_metrics = analysis_run.stock_metrics.aggregate(
+            avg_r2=Avg('r2_oos'),
+            avg_mae=Avg('mae_oos'),
+            avg_dir_acc=Avg('dir_acc_oos')
+        )
+        
+        # Top and bottom performers
+        top_stocks = analysis_run.stock_metrics.order_by('-dir_acc_oos')[:5]
+        bottom_stocks = analysis_run.stock_metrics.order_by('dir_acc_oos')[:5]
+        
+        return Response({
+            'run_info': AnalysisRunSerializer(analysis_run).data,
+            'statistics': {
+                'total_predictions': predictions_count,
+                'unique_stocks': stocks_count,
+                'avg_r2_oos': avg_metrics['avg_r2'],
+                'avg_mae_oos': avg_metrics['avg_mae'],
+                'avg_directional_accuracy': avg_metrics['avg_dir_acc']
+            },
+            'top_performers': StockPerformanceMetricsSerializer(top_stocks, many=True).data,
+            'worst_performers': StockPerformanceMetricsSerializer(bottom_stocks, many=True).data
+        })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_summary(request):
+    """Get dashboard summary data for the authenticated user"""
+    user_runs = AnalysisRun.objects.filter(user=request.user)
+    
+    # Basic counts
+    total_runs = user_runs.count()
+    latest_run = user_runs.order_by('-created_at').first()
+    
+    if total_runs == 0:
+        return Response({
+            'total_runs': 0,
+            'latest_run': None,
+            'avg_directional_accuracy': 0,
+            'avg_r2': 0,
+            'total_predictions': 0,
+            'unique_stocks': 0,
+            'recent_activity': []
+        })
+    
+    # Aggregate metrics across all user runs
+    completed_runs = user_runs.filter(status='completed')
+    if completed_runs.exists():
+        avg_metrics = completed_runs.aggregate(
+            avg_dir_acc=Avg('directional_accuracy'),
+            avg_r2=Avg('r2_global')
+        )
+    else:
+        avg_metrics = {'avg_dir_acc': 0, 'avg_r2': 0}
+    
+    # Total predictions and stocks
+    total_predictions = sum(run.predictions.count() for run in user_runs)
+    unique_stocks = StockPrediction.objects.filter(
+        analysis_run__user=request.user
+    ).values('ticker').distinct().count()
+    
+    # Recent activity
+    recent_runs = user_runs.order_by('-created_at')[:5]
+    
+    serializer = DashboardSummarySerializer({
+        'total_runs': total_runs,
+        'latest_run': latest_run,
+        'avg_directional_accuracy': avg_metrics['avg_dir_acc'] or 0,
+        'avg_r2': avg_metrics['avg_r2'] or 0,
+        'total_predictions': total_predictions,
+        'unique_stocks': unique_stocks,
+        'recent_activity': recent_runs
+    })
+    
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def stock_analysis(request, ticker):
+    """Get comprehensive analysis for a specific stock across all user's runs"""
+    user_runs = AnalysisRun.objects.filter(user=request.user)
+    
+    # Get all predictions for this ticker
+    predictions = StockPrediction.objects.filter(
+        analysis_run__in=user_runs,
+        ticker__iexact=ticker
+    ).order_by('-prediction_date')
+    
+    if not predictions.exists():
+        return Response({'error': 'No data found for this ticker'}, status=404)
+    
+    # Get performance metrics
+    performance_metrics = StockPerformanceMetrics.objects.filter(
+        analysis_run__in=user_runs,
+        ticker__iexact=ticker
+    )
+    
+    # Calculate aggregates
+    total_predictions = predictions.count()
+    avg_prediction = predictions.aggregate(avg=Avg('final_prediction'))['avg']
+    
+    best_performance = performance_metrics.aggregate(best_r2=Max('r2_oos'))['best_r2'] or 0
+    avg_performance = performance_metrics.aggregate(avg_acc=Avg('dir_acc_oos'))['avg_acc'] or 0
+    
+    latest_prediction = predictions.first()
+    recent_predictions = predictions[:10]
+    
+    response_data = {
+        'ticker': ticker.upper(),
+        'total_predictions': total_predictions,
+        'avg_prediction': avg_prediction,
+        'avg_performance': avg_performance,
+        'best_r2': best_performance,
+        'latest_prediction': latest_prediction.final_prediction if latest_prediction else None,
+        'latest_date': latest_prediction.prediction_date if latest_prediction else None,
+        'recent_predictions': recent_predictions
+    }
+    
+    serializer = StockAnalysisSerializer(response_data)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def time_series_analysis(request, run_id, ticker):
+    """Get time series data for a specific stock in a specific run"""
+    try:
+        analysis_run = AnalysisRun.objects.get(id=run_id, user=request.user)
+    except AnalysisRun.DoesNotExist:
+        return Response({'error': 'Analysis run not found'}, status=404)
+    
+    # Get out-of-sample predictions
+    oos_predictions = OutOfSamplePrediction.objects.filter(
+        analysis_run=analysis_run,
+        ticker__iexact=ticker
+    ).order_by('date')
+    
+    if not oos_predictions.exists():
+        return Response({'error': 'No time series data found for this stock'}, status=404)
+    
+    # Prepare time series data
+    dates = [pred.date for pred in oos_predictions]
+    predictions = [pred.y_pred for pred in oos_predictions]
+    actuals = [pred.y_actual for pred in oos_predictions]
+    errors = [pred.prediction_error for pred in oos_predictions]
+    
+    # Calculate cumulative R²
+    cumulative_r2 = []
+    for i in range(1, len(predictions) + 1):
+        subset_preds = predictions[:i]
+        subset_actuals = [a for a in actuals[:i] if a is not None]
+        if len(subset_actuals) >= 2:
+            # Calculate R² for this subset
+            actual_vals = np.array(subset_actuals)
+            pred_vals = np.array(subset_preds[:len(subset_actuals)])
+            
+            ss_tot = np.sum((actual_vals - np.mean(actual_vals)) ** 2)
+            ss_res = np.sum((actual_vals - pred_vals) ** 2)
+            r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            cumulative_r2.append(r2)
+        else:
+            cumulative_r2.append(0)
+    
+    response_data = {
+        'dates': dates,
+        'predictions': predictions,
+        'actuals': actuals,
+        'errors': errors,
+        'cumulative_r2': cumulative_r2
+    }
+    
+    serializer = TimeSeriesAnalysisSerializer(response_data)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def prediction_distribution(request, run_id):
+    """Get distribution analysis of predictions for a specific run"""
+    try:
+        analysis_run = AnalysisRun.objects.get(id=run_id, user=request.user)
+    except AnalysisRun.DoesNotExist:
+        return Response({'error': 'Analysis run not found'}, status=404)
+    
+    predictions = analysis_run.predictions.values_list('final_prediction', flat=True)
+    
+    if not predictions:
+        return Response({'error': 'No predictions found'}, status=404)
+    
+    pred_array = np.array(list(predictions))
+    
+    # Create histogram
+    hist, bin_edges = np.histogram(pred_array, bins=30)
+    bins = bin_edges[:-1].tolist()  # Use left edges of bins
+    counts = hist.tolist()
+    
+    # Calculate percentiles
+    percentiles = {
+        '5th': np.percentile(pred_array, 5),
+        '25th': np.percentile(pred_array, 25),
+        '50th': np.percentile(pred_array, 50),
+        '75th': np.percentile(pred_array, 75),
+        '95th': np.percentile(pred_array, 95)
+    }
+    
+    # Calculate statistics
+    statistics = {
+        'mean': np.mean(pred_array),
+        'std': np.std(pred_array),
+        'min': np.min(pred_array),
+        'max': np.max(pred_array),
+        'skewness': float(pd.Series(pred_array).skew()),
+        'kurtosis': float(pd.Series(pred_array).kurtosis())
+    }
+    
+    response_data = {
+        'bins': bins,
+        'counts': counts,
+        'percentiles': percentiles,
+        'statistics': statistics
+    }
+    
+    serializer = PredictionDistributionSerializer(response_data)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def save_analysis_results(request):
+    """Save pooled model analysis results to database"""
+    try:
+        data = request.data
+        
+        # Create analysis run record
+        analysis_run = AnalysisRun.objects.create(
+            user=request.user,
+            run_name=data.get('run_name', f"Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
+            model_type=data.get('model_type', 'pooled_enet'),
+            horizon_days=data.get('horizon_days', 10),
+            status='completed',
+            completed_at=timezone.now(),
+            # Overall metrics from oos_metrics.csv
+            mae=data.get('mae'),
+            rmse=data.get('rmse'),
+            directional_accuracy=data.get('directional_accuracy'),
+            sample_size=data.get('sample_size'),
+            r2_global=data.get('r2_global'),
+            r2_fold_mean=data.get('r2_fold_mean'),
+            r2_fold_weighted=data.get('r2_fold_weighted'),
+            mae_ratio_global=data.get('mae_ratio_global'),
+            mae_ratio_fold_mean=data.get('mae_ratio_fold_mean'),
+            mae_ratio_fold_weighted=data.get('mae_ratio_fold_weighted')
+        )
+        
+        # Save model coefficients
+        if 'coefficients' in data:
+            coefficient_objects = []
+            for coef_data in data['coefficients']:
+                coefficient_objects.append(ModelCoefficient(
+                    analysis_run=analysis_run,
+                    feature_name=coef_data['feature_name'],
+                    coefficient_value=coef_data['coefficient_value']
+                ))
+            ModelCoefficient.objects.bulk_create(coefficient_objects)
+        
+        # Save predictions
+        if 'predictions' in data:
+            prediction_objects = []
+            for pred_data in data['predictions']:
+                prediction_objects.append(StockPrediction(
+                    analysis_run=analysis_run,
+                    ticker=pred_data['ticker'],
+                    prediction_date=parse_date(pred_data['prediction_date']),
+                    final_prediction=pred_data['final_prediction'],
+                    **{k: v for k, v in pred_data.items() if k not in ['ticker', 'prediction_date', 'final_prediction']}
+                ))
+            StockPrediction.objects.bulk_create(prediction_objects, batch_size=1000)
+        
+        # Save performance metrics
+        if 'performance_metrics' in data:
+            metric_objects = []
+            for metric_data in data['performance_metrics']:
+                metric_objects.append(StockPerformanceMetrics(
+                    analysis_run=analysis_run,
+                    ticker=metric_data['ticker'],
+                    r2_oos=metric_data['r2_oos'],
+                    rmse_oos=metric_data['rmse_oos'],
+                    mae_oos=metric_data['mae_oos'],
+                    mase_oos=metric_data['mase_oos'],
+                    dir_acc_oos=metric_data['dir_acc_oos'],
+                    pred_std_oos=metric_data['pred_std_oos'],
+                    n_obs_oos=metric_data['n_obs_oos']
+                ))
+            StockPerformanceMetrics.objects.bulk_create(metric_objects, batch_size=1000)
+        
+        # Save out-of-sample predictions
+        if 'oos_predictions' in data:
+            oos_objects = []
+            for oos_data in data['oos_predictions']:
+                oos_objects.append(OutOfSamplePrediction(
+                    analysis_run=analysis_run,
+                    ticker=oos_data['ticker'],
+                    date=parse_date(oos_data['date']),
+                    y_pred=oos_data['y_pred'],
+                    y_actual=oos_data.get('y_actual'),
+                    prediction_error=oos_data.get('prediction_error'),
+                    abs_error=oos_data.get('abs_error'),
+                    squared_error=oos_data.get('squared_error'),
+                    fold_id=oos_data.get('fold_id')
+                ))
+            OutOfSamplePrediction.objects.bulk_create(oos_objects, batch_size=1000)
+        
+        # Save fold statistics
+        if 'fold_statistics' in data:
+            fold_objects = []
+            for fold_data in data['fold_statistics']:
+                fold_objects.append(FoldStatistics(
+                    analysis_run=analysis_run,
+                    fold_id=fold_data['fold_id'],
+                    fold_r2=fold_data.get('fold_r2'),
+                    fold_mae=fold_data.get('fold_mae'),
+                    fold_rmse=fold_data.get('fold_rmse'),
+                    fold_directional_acc=fold_data.get('fold_directional_acc'),
+                    fold_n_obs=fold_data.get('fold_n_obs'),
+                    train_start_date=parse_date(fold_data['train_start_date']) if fold_data.get('train_start_date') else None,
+                    train_end_date=parse_date(fold_data['train_end_date']) if fold_data.get('train_end_date') else None,
+                    val_start_date=parse_date(fold_data['val_start_date']) if fold_data.get('val_start_date') else None,
+                    val_end_date=parse_date(fold_data['val_end_date']) if fold_data.get('val_end_date') else None
+                ))
+            FoldStatistics.objects.bulk_create(fold_objects, batch_size=1000)
+        
+        return Response({
+            'message': 'Analysis results saved successfully',
+            'analysis_run_id': analysis_run.id,
+            'run_name': analysis_run.run_name
+        }, status=201)
+        
+    except Exception as e:
+        logger.error(f"Error saving analysis results: {str(e)}")
+        return Response({'error': str(e)}, status=500)
