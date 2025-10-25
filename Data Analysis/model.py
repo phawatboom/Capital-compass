@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import statsmodels.api as sm
+import statsmodels.api as sm # --- RE-ADDED for plotting ---
 from statsmodels.tsa.arima.model import ARIMA
 
 from sklearn.pipeline import Pipeline
@@ -265,11 +265,10 @@ def fit_arima_and_get_b(returns: pd.Series,
     """
     Return an AR(1)-style 'b' with robust fallbacks:
       1) ARIMA(order) → ar.L1 coefficient
-      2) OLS AR(1): r_t ~ r_{t-1}
-      3) Lag-1 autocorrelation
+      2) Lag-1 autocorrelation
     """
     r = returns.dropna().astype(float)
-    # --- BUG FIX: This is the minimum required for ARIMA/OLS/AC1 ---
+    # --- BUG FIX: This is the minimum required for ARIMA/AC1 ---
     if len(r) < 10:
         return None
 
@@ -283,18 +282,9 @@ def fit_arima_and_get_b(returns: pd.Series,
     except Exception as e:
         if verbose: print("ARIMA fail:", e)
 
-    # 2) OLS AR(1)
-    try:
-        x = r.shift(1)
-        df = pd.DataFrame({"y": r.values, "x": x.values}).dropna()
-        if len(df) >= 10:
-            X = sm.add_constant(df["x"])
-            ols = sm.OLS(df["y"], X).fit()
-            return float(ols.params[1])
-    except Exception as e:
-        if verbose: print("OLS fail:", e)
+    # --- REMOVED: 2) OLS AR(1) ---
 
-    # 3) Lag-1 autocorr
+    # 2) Lag-1 autocorr
     try:
         ac1 = r.autocorr(lag=1)
         return float(ac1)
@@ -498,7 +488,7 @@ def _calc_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
 
 def walk_forward_oos_eval(
     learning_df: pd.DataFrame,
-    model_kind: str = "enet",
+    # --- REMOVED: model_kind: str = "enet", ---
     enet_alpha: float = 0.003,
     enet_l1_ratio: float = 0.2,
     dropna_rows: bool = True, # --- *** IMPUTATION CHANGE *** ---
@@ -560,65 +550,44 @@ def walk_forward_oos_eval(
             fold += 1
             continue
 
-        if model_kind.lower() == "enet":
+        # --- REMOVED: if model_kind.lower() == "enet": ---
+        # --- (This is now the only path) ---
+        
+        # --- *** IMPUTATION CHANGE: Fill NaNs with 0.0 *** ---
+        X_tr = tr[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).copy()
+        y_tr = tr["test_b"].astype(float).values
+
+        if np.std(y_tr) < 1e-6:
+            train_end = val_end
+            fold += 1
+            continue
+
+        pipe = Pipeline([
+            ('scaler', StandardScaler(with_mean=True, with_std=True)),
+            ('model',  ElasticNet(alpha=enet_alpha, l1_ratio=enet_l1_ratio, max_iter=10000))
+        ])
+        pipe.fit(X_tr, y_tr)
+        train_cols = X_tr.columns.tolist()
+
+        # VALIDATE: align to train schema and predict
+        # --- *** IMPUTATION CHANGE: Select rows based on dropna_rows param *** ---
+        va = va_df.dropna(subset=["test_b"] + feats) if dropna_rows else va_df.dropna(subset=["test_b"])
+
+        if not va.empty:
             # --- *** IMPUTATION CHANGE: Fill NaNs with 0.0 *** ---
-            X_tr = tr[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).copy()
-            y_tr = tr["test_b"].astype(float).values
+            X_va = va[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).copy()
+            X_va = align_to_training_schema(X_va, train_cols)
+            y_hat = pipe.predict(X_va)
+            preds.append(pd.DataFrame({
+                "Date": va["Date"].values,
+                "Ticker": va["Ticker"].values,
+                "actual_b": va["test_b"].values,
+                "pred_b": y_hat,
+                "fold": fold,
+                "n_train": n_train_rows
+            }))
 
-            if np.std(y_tr) < 1e-6:
-                train_end = val_end
-                fold += 1
-                continue
-
-            pipe = Pipeline([
-                ('scaler', StandardScaler(with_mean=True, with_std=True)),
-                ('model',  ElasticNet(alpha=enet_alpha, l1_ratio=enet_l1_ratio, max_iter=10000))
-            ])
-            pipe.fit(X_tr, y_tr)
-            train_cols = X_tr.columns.tolist()
-
-            # VALIDATE: align to train schema and predict
-            # --- *** IMPUTATION CHANGE: Select rows based on dropna_rows param *** ---
-            va = va_df.dropna(subset=["test_b"] + feats) if dropna_rows else va_df.dropna(subset=["test_b"])
-
-            if not va.empty:
-                # --- *** IMPUTATION CHANGE: Fill NaNs with 0.0 *** ---
-                X_va = va[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).copy()
-                X_va = align_to_training_schema(X_va, train_cols)
-                y_hat = pipe.predict(X_va)
-                preds.append(pd.DataFrame({
-                    "Date": va["Date"].values,
-                    "Ticker": va["Ticker"].values,
-                    "actual_b": va["test_b"].values,
-                    "pred_b": y_hat,
-                    "fold": fold,
-                    "n_train": n_train_rows
-                }))
-
-        else:  # OLS
-            # --- *** IMPUTATION CHANGE: Fill NaNs with 0.0 *** ---
-            X_tr = sm.add_constant(tr[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0), has_constant="add")
-            y_tr = tr["test_b"].astype(float).values
-            if np.std(y_tr) < 1e-6:
-                train_end = val_end
-                fold += 1
-                continue
-            ols = sm.OLS(y_tr, X_tr).fit()
-
-            # --- *** IMPUTATION CHANGE: Select rows based on dropna_rows param *** ---
-            va = va_df.dropna(subset=["test_b"] + feats) if dropna_rows else va_df.dropna(subset=["test_b"])
-            if not va.empty:
-                # --- *** IMPUTATION CHANGE: Fill NaNs with 0.0 *** ---
-                X_va = sm.add_constant(va[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0), has_constant="add")
-                y_hat = ols.predict(X_va).values
-                preds.append(pd.DataFrame({
-                    "Date": va["Date"].values,
-                    "Ticker": va["Ticker"].values,
-                    "actual_b": va["test_b"].values,
-                    "pred_b": y_hat,
-                    "fold": fold,
-                    "n_train": n_train_rows
-                }))
+        # --- REMOVED: else: # OLS block ---
 
         # advance window (expanding)
         train_end = val_end
@@ -847,6 +816,7 @@ def plot_pred_vs_actual(df: pd.DataFrame, outpath: str, title: str = "Predicted 
     x = clean["actual_b"].values
     y = clean["pred_b"].values
 
+    # --- RESTORED: OLS fit line calculation ---
     try:
         X = sm.add_constant(x)
         lin = sm.OLS(y, X).fit()
@@ -869,8 +839,11 @@ def plot_pred_vs_actual(df: pd.DataFrame, outpath: str, title: str = "Predicted 
     plt.figure(figsize=(6,5))
     plt.scatter(x, y, alpha=0.2, s=10, rasterized=True) # Use alpha and rasterized for large N
     plt.plot([lo, hi], [lo, hi], linestyle="--", linewidth=1, label="45° line", color="red")
+    
+    # --- RESTORED: OLS fit line plot ---
     if xgrid is not None and yhat is not None:
         plt.plot(xgrid, yhat, linewidth=2, label="OLS fit", color="blue")
+    
     plt.xlabel("Actual b")
     plt.ylabel("Predicted b")
     plt.title(title)
@@ -894,6 +867,8 @@ def plot_b_lagged_b(df: pd.DataFrame, outpath: Optional[str] = None, title: Opti
         return
     x = tmp["train_b"].values
     y = tmp["test_b"].values
+    
+    # --- RESTORED: OLS fit line calculation ---
     X = sm.add_constant(x)
     lin = sm.OLS(y, X).fit()
     xgrid = np.linspace(np.nanmin(x), np.nanmax(x), 200)
@@ -901,7 +876,10 @@ def plot_b_lagged_b(df: pd.DataFrame, outpath: Optional[str] = None, title: Opti
 
     plt.figure(figsize=(6,5))
     plt.scatter(x, y, alpha=0.2, s=10, rasterized=True)
+    
+    # --- RESTORED: OLS fit line plot ---
     plt.plot(xgrid, yhat, linewidth=2, color="blue")
+    
     plt.axhline(0, linestyle="--", linewidth=1, color="grey")
     plt.axvline(0, linestyle="--", linewidth=1, color="grey")
     plt.xlabel("Historical b (train_b)")
@@ -1263,7 +1241,7 @@ def train_final_model_and_save(
         # --- *** IMPUTATION CHANGE: Set dropna_rows=False *** ---
         oos_preds, oos_metrics, oos_folds = walk_forward_oos_eval( 
             learning_df=pooled_df,
-            model_kind="enet",
+            # --- REMOVED: model_kind="enet", ---
             enet_alpha=alpha,
             enet_l1_ratio=l1_ratio,
             dropna_rows=False, # This will impute 0.0 for NaNs
