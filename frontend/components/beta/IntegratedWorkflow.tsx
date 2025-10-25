@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Play, CheckCircle, AlertCircle, RefreshCw, BarChart3 } from "lucide-react";
 import { useDropzone } from 'react-dropzone';
+import api from '@/app/lib/api';
 
 interface ClientStatus {
   status: string;
@@ -26,13 +27,15 @@ interface ClientStatus {
 
 interface IntegratedWorkflowProps {
   onResultsReady?: (clientId: string) => void;
+  fileId?: number; // Optional file ID for pre-uploaded files
 }
 
-export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) {
+export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflowProps) {
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'uploaded' | 'processing' | 'completed' | 'error'>('idle');
   const [clientId, setClientId] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [horizonDays, setHorizonDays] = useState<string>('10');
+  const [preUploadedFileInfo, setPreUploadedFileInfo] = useState<any>(null);
   
   // Enhanced model configuration for fund managers
   const [modelConfig, setModelConfig] = useState({
@@ -41,7 +44,13 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
     minimumConfidence: '0.6', // 0.5-0.9
     lookbackPeriod: '60', // 30, 60, 90, 120 days
     volatilityAdjustment: 'true', // true/false
-    crossSectionalRanking: 'true' // true/false
+    crossSectionalRanking: 'true', // true/false
+    // Advanced model parameters
+    trainingDays: '252', // 1 year default
+    testingDays: '63', // 3 months default  
+    alpha: '0.01', // L1/L2 regularization strength
+    l1Ratio: '0.5', // ElasticNet mixing parameter (0=Ridge, 1=Lasso)
+    multiPeriod: 'false' // Run predictions for all periods (1d, 5d, 10d, 20d)
   });
   
   const [clientStatus, setClientStatus] = useState<ClientStatus | null>(null);
@@ -49,7 +58,48 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [statusInterval, setStatusInterval] = useState<NodeJS.Timeout | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  // Handle pre-uploaded file
+  useEffect(() => {
+    if (fileId) {
+      console.log('Loading pre-uploaded file with ID:', fileId);
+      loadPreUploadedFile();
+    }
+  }, [fileId]);
+
+  const loadPreUploadedFile = async () => {
+    if (!fileId) return;
+
+    try {
+      setUploadState('uploading');
+      setError('');
+      console.log('Fetching file meta for fileId:', fileId);
+      
+      // Fetch file information from the backend using the meta endpoint
+      const response = await api.get(`/csv-uploads/${fileId}/meta/`);
+      const fileInfo = response.data;
+      
+      console.log('Received file info:', fileInfo);
+      
+      setPreUploadedFileInfo(fileInfo);
+      setClientId(`file_${fileId}_${Date.now()}`);
+      setUploadState('uploaded');
+      setClientStatus({
+        status: 'uploaded',
+        filename: fileInfo.filename,
+        // Try multiple possible field names for row/column counts
+        n_rows: fileInfo.n_rows || fileInfo.rows || fileInfo.row_count || 0,
+        n_cols: fileInfo.n_cols || fileInfo.columns || fileInfo.column_count || 0
+      });
+      
+      console.log('Pre-uploaded file loaded successfully');
+    } catch (err) {
+      console.error('Error loading pre-uploaded file:', err);
+      setError(`Failed to load pre-uploaded file information: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setUploadState('error');
+    }
+  };
+
+  // File upload state
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -84,13 +134,13 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
     formData.append('client_id', clientId || `client_${Date.now()}`);
 
     try {
-      const response = await fetch(`${API_BASE}/api/integrated/upload/`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
+      const response = await api.post('/integrated/upload/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.status === 'success') {
         setClientId(result.data.client_id);
@@ -117,26 +167,34 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE}/api/integrated/run-model/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          client_id: clientId,
-          horizon_days: parseInt(horizonDays),
-          // Enhanced model configuration
-          risk_tolerance: modelConfig.riskTolerance,
-          sector_filter: modelConfig.sectorFilter,
-          minimum_confidence: parseFloat(modelConfig.minimumConfidence),
-          lookback_period: parseInt(modelConfig.lookbackPeriod),
-          volatility_adjustment: modelConfig.volatilityAdjustment === 'true',
-          cross_sectional_ranking: modelConfig.crossSectionalRanking === 'true'
-        }),
-      });
+      // Use different endpoint based on whether we have a pre-uploaded file or uploaded via the workflow
+      const endpoint = fileId ? '/integrated/run-model-with-file/' : '/integrated/run-model/';
+      const payload: any = {
+        client_id: clientId,
+        horizon_days: parseInt(horizonDays),
+        // Enhanced model configuration
+        risk_tolerance: modelConfig.riskTolerance,
+        sector_filter: modelConfig.sectorFilter,
+        minimum_confidence: parseFloat(modelConfig.minimumConfidence),
+        lookback_period: parseInt(modelConfig.lookbackPeriod),
+        volatility_adjustment: modelConfig.volatilityAdjustment === 'true',
+        cross_sectional_ranking: modelConfig.crossSectionalRanking === 'true',
+        // Advanced model parameters
+        training_days: parseInt(modelConfig.trainingDays),
+        testing_days: parseInt(modelConfig.testingDays),
+        alpha: parseFloat(modelConfig.alpha),
+        l1_ratio: parseFloat(modelConfig.l1Ratio),
+        multi_period: modelConfig.multiPeriod === 'true'
+      };
 
-      const result = await response.json();
+      // Add file ID if using pre-uploaded file
+      if (fileId) {
+        payload.file_id = fileId;
+      }
+
+      const response = await api.post(endpoint, payload);
+
+      const result = response.data;
 
       if (result.status === 'success') {
         // Start polling for status
@@ -155,11 +213,8 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
     if (!clientId) return;
 
     try {
-      const response = await fetch(`${API_BASE}/api/integrated/status/${clientId}/`, {
-        credentials: 'include',
-      });
-
-      const result = await response.json();
+      const response = await api.get(`/integrated/status/${clientId}/`);
+      const result = response.data;
 
       if (result.status === 'success') {
         setClientStatus(result.data);
@@ -188,15 +243,22 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
   };
 
   const resetWorkflow = () => {
-    setUploadState('idle');
-    setClientId('');
-    setSelectedFile(null);
-    setClientStatus(null);
-    setError('');
-    setUploadProgress(0);
-    if (statusInterval) {
-      clearInterval(statusInterval);
-      setStatusInterval(null);
+    if (fileId) {
+      // If coming from a pre-uploaded file, navigate back to My Data
+      window.location.href = '/uploads';
+    } else {
+      // Regular reset for normal workflow
+      setUploadState('idle');
+      setClientId('');
+      setSelectedFile(null);
+      setClientStatus(null);
+      setError('');
+      setUploadProgress(0);
+      setPreUploadedFileInfo(null);
+      if (statusInterval) {
+        clearInterval(statusInterval);
+        setStatusInterval(null);
+      }
     }
   };
 
@@ -242,16 +304,21 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h2 className="text-2xl font-bold">Custom Beta Model Analysis</h2>
+          <h2 className="text-2xl font-bold">
+            {fileId ? 'Configure Beta Model Analysis' : 'Custom Beta Model Analysis'}
+          </h2>
           <p className="text-muted-foreground">
-            Upload your data, run the universal model, and view personalized results
+            {fileId 
+              ? 'Configure and run the universal model on your selected dataset'
+              : 'Upload your data, run the universal model, and view personalized results'
+            }
           </p>
         </div>
         <div className="flex items-center gap-3">
           {getStatusBadge()}
           {uploadState !== 'idle' && (
             <Button variant="outline" onClick={resetWorkflow}>
-              Start New Analysis
+              {fileId ? 'Back to My Data' : 'Start New Analysis'}
             </Button>
           )}
         </div>
@@ -270,18 +337,45 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm ${
-              uploadState === 'idle' ? 'bg-blue-600 text-white' : 
-              uploadState === 'uploading' || uploadState === 'uploaded' ? 'bg-green-600 text-white' : 
+              fileId || uploadState === 'uploaded' || uploadState === 'processing' || uploadState === 'completed' ? 'bg-green-600 text-white' : 
+              uploadState === 'uploading' ? 'bg-blue-600 text-white' : 
               'bg-gray-400 text-white'
             }`}>1</span>
-            Upload Your Data
+            {fileId ? 'Selected Data File' : 'Upload Your Data'}
           </CardTitle>
           <CardDescription>
-            Upload a CSV file with columns: Date, Ticker, Price (or Close/Adj_Close)
+            {fileId 
+              ? 'File selected from My Data - ready for analysis'
+              : 'Upload a CSV file with columns: Date, Ticker, Price (or Close/Adj_Close)'
+            }
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {uploadState === 'idle' || uploadState === 'error' ? (
+          {fileId && preUploadedFileInfo ? (
+            // Show pre-uploaded file information
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <p className="font-medium text-blue-900">Using Pre-uploaded File</p>
+                    <p className="text-sm text-blue-700">{preUploadedFileInfo.filename}</p>
+                    <p className="text-xs text-blue-600">
+                      {(preUploadedFileInfo.rows || preUploadedFileInfo.row_count || 0).toLocaleString()} rows, 
+                      {' '}{preUploadedFileInfo.columns || preUploadedFileInfo.column_count || 0} columns
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-blue-700 border-blue-300">
+                  Ready for Analysis
+                </Badge>
+              </div>
+              <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded-lg">
+                <p className="font-medium mb-1">File already uploaded from My Data</p>
+                <p>Proceed to configure the model parameters and run the analysis.</p>
+              </div>
+            </div>
+          ) : uploadState === 'idle' || uploadState === 'error' || uploadState === 'uploading' ? (
             <div className="space-y-4">
               <div
                 {...getRootProps()}
@@ -325,6 +419,7 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
               )}
             </div>
           ) : (
+            // Show uploaded file status for regular upload workflow
             <div className="space-y-3">
               <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                 <div className="flex items-center gap-3">
@@ -375,6 +470,7 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
                     <SelectItem value="20">20 Days (Monthly)</SelectItem>
                   </SelectContent>
                 </Select>
+                  <p className="text-xs text-gray-500 mt-1">Note: server-side sector filtering is only applied if the uploaded dataset includes a 'sector' column and the backend is configured to use it.</p>
               </div>
               <div>
                 <Label>Client ID</Label>
@@ -497,6 +593,104 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
                 </div>
               </div>
 
+              {/* Advanced Model Training Parameters */}
+              <div className="border-t pt-4 mt-4">
+                <h5 className="font-medium mb-4 text-sm text-gray-700">Advanced Model Training Parameters</h5>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <Label htmlFor="trainingDays">Training Period (Days)</Label>
+                    <Select 
+                      value={modelConfig.trainingDays} 
+                      onValueChange={(value) => setModelConfig(prev => ({...prev, trainingDays: value}))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select training period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="126">6 Months (126 days)</SelectItem>
+                        <SelectItem value="252">1 Year (252 days)</SelectItem>
+                        <SelectItem value="504">2 Years (504 days)</SelectItem>
+                        <SelectItem value="756">3 Years (756 days)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="testingDays">Testing Period (Days)</Label>
+                    <Select 
+                      value={modelConfig.testingDays} 
+                      onValueChange={(value) => setModelConfig(prev => ({...prev, testingDays: value}))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select testing period" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="21">1 Month (21 days)</SelectItem>
+                        <SelectItem value="42">2 Months (42 days)</SelectItem>
+                        <SelectItem value="63">3 Months (63 days)</SelectItem>
+                        <SelectItem value="126">6 Months (126 days)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="alpha">Regularization Strength (Alpha)</Label>
+                    <Select 
+                      value={modelConfig.alpha} 
+                      onValueChange={(value) => setModelConfig(prev => ({...prev, alpha: value}))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select alpha" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0.001">0.001 (Weak regularization)</SelectItem>
+                        <SelectItem value="0.01">0.01 (Standard)</SelectItem>
+                        <SelectItem value="0.1">0.1 (Strong regularization)</SelectItem>
+                        <SelectItem value="1.0">1.0 (Very strong)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="l1Ratio">L1 Ratio (ElasticNet Mix)</Label>
+                    <Select 
+                      value={modelConfig.l1Ratio} 
+                      onValueChange={(value) => setModelConfig(prev => ({...prev, l1Ratio: value}))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select L1 ratio" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0.0">0.0 (Ridge - L2 only)</SelectItem>
+                        <SelectItem value="0.25">0.25 (Mostly Ridge)</SelectItem>
+                        <SelectItem value="0.5">0.5 (Balanced ElasticNet)</SelectItem>
+                        <SelectItem value="0.75">0.75 (Mostly Lasso)</SelectItem>
+                        <SelectItem value="1.0">1.0 (Lasso - L1 only)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="md:col-span-2 lg:col-span-1">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="multiPeriod"
+                        checked={modelConfig.multiPeriod === 'true'}
+                        onChange={(e) => setModelConfig(prev => ({...prev, multiPeriod: e.target.checked ? 'true' : 'false'}))}
+                        className="rounded border-gray-300"
+                      />
+                      <Label htmlFor="multiPeriod" className="text-sm">
+                        Multi-Period Analysis (1d, 5d, 10d, 20d)
+                      </Label>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Run predictions for all time horizons
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Configuration Summary */}
               <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                 <h5 className="text-sm font-medium mb-2">Configuration Summary</h5>
@@ -504,6 +698,8 @@ export function IntegratedWorkflow({ onResultsReady }: IntegratedWorkflowProps) 
                   <p>• Horizon: {horizonDays} days | Risk: {modelConfig.riskTolerance} | Confidence: {modelConfig.minimumConfidence}</p>
                   <p>• Lookback: {modelConfig.lookbackPeriod} days | Sector: {modelConfig.sectorFilter}</p>
                   <p>• Volatility Adj: {modelConfig.volatilityAdjustment} | Cross-Sectional: {modelConfig.crossSectionalRanking}</p>
+                  <p>• Training: {modelConfig.trainingDays}d | Testing: {modelConfig.testingDays}d | Alpha: {modelConfig.alpha} | L1: {modelConfig.l1Ratio}</p>
+                  <p>• Multi-Period: {modelConfig.multiPeriod}</p>
                 </div>
               </div>
             </div>

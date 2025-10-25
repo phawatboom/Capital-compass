@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +10,23 @@ import { IntegratedWorkflow } from '@/components/beta/IntegratedWorkflow';
 import { Upload, BarChart3, Database, Zap } from "lucide-react";
 
 export default function CompleteBetaAnalysisPage() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('overview');
   const [clientResultsReady, setClientResultsReady] = useState<string | null>(null);
+
+  // Get parameters from URL
+  const tabParam = searchParams.get('tab');
+  const fileIdParam = searchParams.get('fileId');
+
+  useEffect(() => {
+    // If tab parameter is provided, set it as active
+    if (tabParam) {
+      setActiveTab(tabParam);
+    } else if (fileIdParam) {
+      // If fileId is provided (coming from My Data analyze), go directly to upload tab
+      setActiveTab('upload');
+    }
+  }, [tabParam, fileIdParam]);
 
   const handleResultsReady = (clientId: string) => {
     setClientResultsReady(clientId);
@@ -37,7 +53,7 @@ export default function CompleteBetaAnalysisPage() {
           </TabsTrigger>
           <TabsTrigger value="upload" className="flex items-center gap-2">
             <Upload className="h-4 w-4" />
-            Upload & Analyze
+            Configure & Analyze
           </TabsTrigger>
           <TabsTrigger value="dashboard" className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
@@ -177,7 +193,10 @@ export default function CompleteBetaAnalysisPage() {
 
         {/* Upload & Analyze Tab */}
         <TabsContent value="upload" className="space-y-6">
-          <IntegratedWorkflow onResultsReady={handleResultsReady} />
+          <IntegratedWorkflow 
+            onResultsReady={handleResultsReady} 
+            fileId={fileIdParam ? parseInt(fileIdParam, 10) : undefined}
+          />
         </TabsContent>
 
         {/* Dashboard Tab */}

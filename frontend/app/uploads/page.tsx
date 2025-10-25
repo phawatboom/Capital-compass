@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Download,
   Search,
@@ -81,9 +83,8 @@ function getCsrfToken(): string | null {
 }
 
 export default function UploadsPage() {
-  const [analyzingId, setAnalyzingId] = useState<number | null>(null);
-  const [analysisProgress, setAnalysisProgress] = useState<string>("");
-  const [progressPercent, setProgressPercent] = useState<number>(0);
+  const router = useRouter();
+  
   const [results, setResults] = useState([]); // State for storing analysis results
   // Data
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
@@ -210,79 +211,9 @@ export default function UploadsPage() {
     if (kind === "day") setDayFilter(null);
   };
 
-    const handleAnalyze = async (uploadId: number) => {
-      setAnalyzingId(uploadId);
-      setError(null);
-      setAnalysisProgress("Preparing analysis...");
-      setProgressPercent(10);
-
-      try {
-        const token = await ensureCsrf();
-
-        // Show ongoing progress while waiting for response
-        const progressMessages = [
-          "Loading file and parsing sheets...",
-          "Building pooled learning table...",
-          "Training ElasticNet model...",
-          "Saving results to database...",
-          "Finalizing analysis..."
-        ];
-
-        // Simulate progressive updates
-        let step = 0;
-        const interval = setInterval(() => {
-          if (step < progressMessages.length) {
-            setAnalysisProgress(progressMessages[step]);
-            setProgressPercent((step + 1) * 20);
-            step++;
-          }
-        }, 2500); // update every 2.5s
-
-        const response = await fetch(`${API_BASE}/csv-uploads/${uploadId}/analyze/`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "X-CSRFToken": token,
-            "Content-Type": "application/json",
-          },
-        });
-
-        clearInterval(interval);
-        setProgressPercent(100);
-        setAnalysisProgress("Analysis complete! Downloading results...");
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          const errorMessage =
-            errorData?.error ||
-            errorData?.details ||
-            `Analysis failed with status: ${response.status}`;
-          throw new Error(errorMessage);
-        }
-
-        const disposition = response.headers.get("Content-Disposition");
-        let filename = "forecast.csv";
-        if (disposition && disposition.includes("filename=")) {
-          filename = disposition.split("filename=")[1].replace(/"/g, "");
-        }
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-
-      } catch (err: any) {
-        setError(err.message || "An unknown error occurred.");
-      } finally {
-        setAnalyzingId(null);
-        setAnalysisProgress("");
-        setProgressPercent(0);
-      }
+    const handleAnalyze = (uploadId: number) => {
+      // Navigate to beta analysis platform with the file ID
+      router.push(`/dashboard/beta-analysis-platform?fileId=${uploadId}`);
     };
   const handleSelectAllOnPage = (checked: boolean) => {
     const next = new Set(selected);
@@ -487,6 +418,24 @@ export default function UploadsPage() {
   return (
     <RequireAuth>
       <div className="mx-auto w-full max-w-screen-xl px-3 sm:px-4 py-6">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">My Data</h1>
+              <p className="text-gray-600 text-sm mt-1">
+                View and manage your uploaded data files
+              </p>
+            </div>
+            <Link href="/upload">
+              <Button className="inline-flex items-center gap-2">
+                <UploadIcon className="w-4 h-4" />
+                Upload New Data
+              </Button>
+            </Link>
+          </div>
+        </div>
+
         {/*<div className="mb-6">*/}
         {/*  <form onSubmit={handleUpload} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">*/}
         {/*    <input*/}
@@ -728,37 +677,15 @@ export default function UploadsPage() {
                             >
                               <Download className="w-4 h-4" />
                             </Button>
-                            <div className="flex flex-col items-center w-full">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 px-2 flex items-center justify-center gap-2"
-                                    onClick={() => handleAnalyze(u.id)}
-                                    disabled={analyzingId === u.id}
-                                    title="Analyze"
-                                  >
-                                    {analyzingId === u.id ? (
-                                      <>
-                                        <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
-                                        Analyzing...
-                                      </>
-                                    ) : (
-                                      "Analyze"
-                                    )}
-                                  </Button>
-
-                                  {analyzingId === u.id && (
-                                    <div className="mt-2 w-full text-center">
-                                      <p className="text-xs text-gray-500">{analysisProgress || "Running model..."}</p>
-                                      <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
-                                        <div
-                                          className="bg-blue-500 h-1 rounded-full transition-all duration-500"
-                                          style={{ width: `${progressPercent}%` }}
-                                        />
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 px-2"
+                              onClick={() => handleAnalyze(u.id)}
+                              title="Analyze with Beta Model"
+                            >
+                              Analyze
+                            </Button>
                             <Button
                               type="button"
                               variant="outline"
