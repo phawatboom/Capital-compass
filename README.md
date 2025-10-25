@@ -9,6 +9,9 @@ A comprehensive web application for forecasting and analyzing stock beta coeffic
 | Henri Chemla      | Web Application |
 | Trey Miller-Henry | Web Application |
 | Phawat Saengsiripongpun | Web Application |
+| Charles Benson    | Model/Stats     |
+| Shawna Chandra    | Model/Stats     |
+| Josh Nguyen       | Model/Stats     |
 
 ## 🎯 Overview
 
@@ -51,16 +54,18 @@ This platform integrates sophisticated beta coefficient forecasting models with 
 
 #### 1. Clone Repository
 ```bash
-git clone <repository-url>
+git clone https://github.com/uoa-compsci399-s2-2025/capstone-team-bobbers.git
 cd capstone-project-s2-2025-team-11
 ```
 
 #### 2. Backend Setup
 ```bash
 cd backend
-conda create -n dashenv python=3.12
-conda activate dashenv
+
 pip install -r requirements.txt
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 python manage.py migrate
 python manage.py import_beta_data  # Import beta coefficient data
 python manage.py runserver 8000
@@ -75,55 +80,12 @@ pnpm run dev
 
 #### 4. Access Application
 - **Frontend**: http://localhost:3000
-- **Beta Dashboard**: http://localhost:3000/beta
-- **Backend API**: http://localhost:8000/api/
 
 ### 📖 Deployment Guide
 
-For detailed production deployment instructions, see **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**
+For detailed production deployment instructions, see **[readme-files/DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**
 
-### 1. Clone Repository
-```bash
-git clone <repository-url>
-cd capstone-project-s2-2025-team-11
-```
 
-### 2. Setup Backend
-```bash
-cd backend
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Setup database
-python manage.py migrate
-
-# Create superuser (optional)
-python manage.py createsuperuser
-
-# Run development server
-python manage.py runserver
-```
-
-### 3. Setup Frontend
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Run development server
-npm run dev
-```
-
-### 4. Access Application
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- Admin Interface: http://localhost:8000/admin
 
 ## 📊 Beta Coefficient Integration
 
@@ -163,60 +125,6 @@ python manage.py import_beta_data --betas-file path/to/betas.csv --forecast-file
 python manage.py import_beta_data --clear-existing
 ```
 
-## 🎛️ Features
-
-### Dashboard Components
-
-#### Summary Table
-- **Filtering**: By ticker, confidence level, date range
-- **Sorting**: All columns with visual indicators
-- **Metrics**: Latest predictions, accuracy, R² scores
-- **Actions**: Drill-down to detailed time series
-
-#### Time Series Charts
-- **Predictions vs Actuals**: Visual comparison over time
-- **Confidence Bands**: Statistical uncertainty visualization
-- **Interactive**: Hover tooltips with detailed metrics
-- **Reference Lines**: Market beta (β=1) indicators
-
-#### Statistics Cards
-- **Portfolio Overview**: Total stocks, confidence distribution
-- **Performance**: Average R² scores, forecast counts
-- **Real-time**: Auto-refresh capabilities
-
-### Model Features
-
-#### Statistical Validation
-- **Significance Testing**: P-value thresholds with confidence levels
-- **Model Selection**: AIC-based feature optimization
-- **Cross-validation**: Time series walk-forward validation
-
-#### Risk Management
-- **Confidence Intervals**: 95% prediction bands
-- **Quality Gates**: Statistical significance requirements
-- **Regime Detection**: Market volatility adaptation
-
-## 🛠️ Development
-
-### Project Structure
-```
-├── backend/                 # Django REST API
-│   ├── webapp/             # Main Django app
-│   │   ├── models.py       # Database models
-│   │   ├── serializers.py  # API serializers
-│   │   ├── views.py        # API endpoints
-│   │   └── management/     # Custom commands
-│   └── requirements.txt    # Python dependencies
-├── frontend/               # Next.js application
-│   ├── app/               # App router pages
-│   ├── components/        # React components
-│   │   └── beta/         # Beta-specific components
-│   └── package.json      # Node dependencies
-├── data_analysis/         # Model scripts
-├── outputs/              # Model output files
-├── scripts/             # Automation scripts
-└── docs/               # Documentation
-```
 
 ## 📈 Model Integration
 
@@ -232,55 +140,7 @@ python manage.py import_beta_data
 python scripts/run_beta_model.py
 ```
 
-## 🚢 Deployment
 
-### Production Setup
-
-1. **Database Configuration**
-   ```bash
-   # PostgreSQL setup
-   createdb beta_forecasting
-   python manage.py migrate
-   ```
-
-2. **Static Files**
-   ```bash
-   # Collect Django static files
-   python manage.py collectstatic
-   
-   # Build Next.js application
-   npm run build
-   ```
-
-## 📚 API Documentation
-
-### Beta Analysis
-```bash
-# Summary statistics
-GET /api/beta/summary/
-
-# Time series data
-GET /api/beta/timeseries/AAPL/
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-Built with ❤️ for financial analysis and quantitative research.
-| Charles Benson    | Model/Stats     |
-| Shawna Chandra    | Model/Stats     |
-| Josh Nguyen       | Model/Stats     |
 
 ## Web Application ERD draw.io
 
@@ -289,6 +149,9 @@ https://drive.google.com/file/d/1aYSvOKf-rMmw-iKoTTLAGJ-eNH6uc5Kg/view?usp=shari
 ## If you want to code online
 
 [![Open in Codespaces](https://classroom.github.com/assets/launch-codespace-2972f46106e565e64193e422d61a12cf1da4916b45550586e14ef0a7c637dd04.svg)](https://classroom.github.com/open-in-codespaces?assignment_repo_id=19989671)
+
+
+
 
 
 
@@ -397,42 +260,3 @@ npm install react-date-range date-fns
 ```bash
 npm run dev
 ```
-
-## Testing CSV Upload and Download Features
-
-### 1. Start the Backend
-#### Open a Git Bash terminal and navigate to the backend folder:
-```bash
-cd backend
-```
-
-#### Activate the virtual environment:
-###### on a Windows system:
-```bash
-venv\Scripts\activate
-```
-
-###### On a macOS/Linux system:
-```bash
-source venv/bin/activate 
-```
-
-
-#### Run the Django development server:
-```bash
-python manage.py runserver
-```
-
-### 2. Start the Frontend
-#### Open a second Git Bash terminal and navigate to the frontend folder:
-```bash
-cd frontend
-```
-
-#### Start the Next.js development server:
-```bash
-pnpm run dev
-#switch to use pnpm instead because it is faster
-#npm run dev
-```
-#### The frontend will run at http://localhost:3000/
