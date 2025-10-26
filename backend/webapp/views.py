@@ -1031,10 +1031,27 @@ def change_password(request):
 @permission_classes([IsAuthenticated])
 def analyze_upload(request, pk: int):
     try:
-        result = run_analysis_from_web(upload_pk=pk, model_for_pred="enet")
+        # Parse model configuration safely from frontend POST
+        config = {
+            "horizon_days": int(request.data.get("horizon_days", 5)),
+            "training_days": int(request.data.get("training_days", 756)),
+            "testing_days": int(request.data.get("testing_days", 252)),
+            "alpha": float(request.data.get("alpha", 0.003)),
+            "l1_ratio": float(request.data.get("l1_ratio", 0.2)),
+            "multi_period": bool(request.data.get("multi_period", False)),
+        }
+
+        result = run_analysis_from_web(
+            upload_pk=pk,
+            model_for_pred="enet",
+            config=config,
+        )
+
         if not result.get("ok"):
             raise RuntimeError(result.get("error", "Unknown error"))
+
         return Response(result, status=status.HTTP_200_OK)
+
     except Exception as e:
         return Response({"ok": False, "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
