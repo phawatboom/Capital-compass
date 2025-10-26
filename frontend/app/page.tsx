@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-0">
       {/* Hero Section */}
       <section className="py-20 px-4">
         <div className="container mx-auto text-center max-w-4xl">
@@ -53,20 +53,19 @@ export default function HomePage() {
           <div className="grid md:grid-cols-3 gap-8">
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <Zap className="h-12 w-12 text-blue-600 mb-4" />
+                <Zap className="h-12 w-12 text-blue-500 mb-4" />
                 <CardTitle>Market-Wide Learning</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Our Universal Model learns from patterns across the entire stock universe, not just individual stocks. 
-                  This approach provides stable and forward-looking beta forecasts.
+                  Our Universal Model learns from patterns across the entire stock universe, not just individual stocks, delivering stable and forward-looking beta forecasts.
                 </CardDescription>
               </CardContent>
             </Card>
 
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <TrendingUp className="h-12 w-12 text-green-600 mb-4" />
+                <Shield className="h-12 w-12 text-purple-500 mb-4" />
                 <CardTitle>Pooled Intelligence</CardTitle>
               </CardHeader>
               <CardContent>
@@ -79,13 +78,12 @@ export default function HomePage() {
 
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <Shield className="h-12 w-12 text-purple-600 mb-4" />
+                <TrendingUp className="h-12 w-12 text-green-500 mb-4" />
                 <CardTitle>Performance Outcomes</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Our forecasts translate complex market signals into tangible performance insights.
-                  Identify which stocks are likely to outperform or lag, anticipate beta shifts before they happen.
+                  Our forecasts translate complex market signals into tangible insights, helping you identify which stocks may outperform or lag and anticipate beta shifts early.
                 </CardDescription>
               </CardContent>
             </Card>
