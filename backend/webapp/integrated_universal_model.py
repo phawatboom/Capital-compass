@@ -278,56 +278,19 @@ class IntegratedUniversalBetaModel:
         logger.info(f"Column mapping: {col_mapping}")
         logger.info(f"Total columns: {len(df.columns)}")
         
-        # Emergency override for large column counts (likely misdetection)
+        # For datasets with many columns (>100), assume it's wide format with tickers as columns
         if len(df.columns) > 100:
-            logger.warning(f"Large column count ({len(df.columns)}) detected - forcing long format check")
+            logger.warning(f"Large column count ({len(df.columns)}) detected - likely wide format with tickers as columns")
             
-            # Force re-examination with looser criteria for long format
-            if not (has_date_col and has_ticker_col and has_price_col):
-                logger.info("Re-examining columns with looser criteria for large dataset...")
-                
-                # Look for any column that might contain identifiers (tickers)
-                potential_ticker_col = None
-                potential_price_col = None
-                
-                for col in df.columns[:10]:  # Check first 10 columns
-                    sample_values = df[col].dropna().head(20).astype(str)
-                    
-                    # Check if column contains stock-like identifiers
-                    if not has_ticker_col and sample_values.str.len().median() <= 6:  # Short strings like "AAPL"
-                        if sample_values.str.match(r'^[A-Z]{1,6}$').sum() > len(sample_values) * 0.3:  # 30% match ticker pattern
-                            logger.info(f"Found potential ticker column: {col}")
-                            col_mapping[col] = 'Ticker'
-                            has_ticker_col = True
-                            potential_ticker_col = col
-                    
-                    # Check if column contains numeric price-like data
-                    if not has_price_col and col != potential_ticker_col:
-                        try:
-                            numeric_sample = pd.to_numeric(sample_values, errors='coerce')
-                            if numeric_sample.notna().sum() > len(sample_values) * 0.7:  # 70% numeric
-                                logger.info(f"Found potential price column: {col}")
-                                col_mapping[col] = 'Price'
-                                has_price_col = True
-                        except:
-                            pass
-                
-                # Additional fallback: try common column names
-                if not has_ticker_col:
-                    for col in df.columns[:20]:
-                        if any(word in col.lower() for word in ['symbol', 'ticker', 'stock', 'security', 'id']):
-                            logger.info(f"Found ticker column by name pattern: {col}")
-                            col_mapping[col] = 'Ticker'
-                            has_ticker_col = True
-                            break
-                
-                if not has_price_col:
-                    for col in df.columns[:20]:
-                        if any(word in col.lower() for word in ['price', 'close', 'value', 'return', 'ret']):
-                            logger.info(f"Found price column by name pattern: {col}")
-                            col_mapping[col] = 'Price'
-                            has_price_col = True
-                            break
+            # For very wide datasets, assume it's already in wide format (Date + ticker columns)
+            # This is common for financial datasets where each column represents a different stock
+            if has_date_col:
+                logger.info("Wide format detected with date column - processing as ticker columns")
+                return self._process_wide_format(df, sector_filter)
+            else:
+                # Assume first column is date for wide format
+                logger.info("Wide format detected without explicit date column - assuming first column is date")
+                return self._process_wide_format(df, sector_filter)
         
         # If we have all three columns, this is long format
         if has_date_col and has_ticker_col and has_price_col:
@@ -335,36 +298,12 @@ class IntegratedUniversalBetaModel:
             return self._process_long_format(df, col_mapping, sector_filter)
         else:
             # For wide format, we need at least a date column and some numeric columns
-            if has_date_col and len(df.columns) <= 100:  # Reasonable number of columns for wide format
+            if has_date_col or len(df.columns) > 100:  # Wide format with explicit date or many columns
                 logger.info("Detected wide format data (Date + ticker columns)")
                 return self._process_wide_format(df, sector_filter)
-            elif len(df.columns) > 100:
-                # Too many columns for wide format - try to force long format processing
-                logger.error(f"Dataset has {len(df.columns)} columns which is too many for wide format.")
-                
-                # Last resort: try to guess long format columns from first few columns
-                if len(df.columns) >= 3:
-                    logger.info("Attempting emergency long format detection with first 3 columns...")
-                    emergency_mapping = {
-                        df.columns[0]: 'Date',  # Assume first column is date
-                        df.columns[1]: 'Ticker',  # Assume second is ticker
-                        df.columns[2]: 'Price'   # Assume third is price
-                    }
-                    logger.info(f"Emergency mapping: {emergency_mapping}")
-                    
-                    try:
-                        return self._process_long_format(df, emergency_mapping, sector_filter)
-                    except Exception as e:
-                        logger.error(f"Emergency long format processing failed: {e}")
-                
-                raise ValueError(f"Dataset has {len(df.columns)} columns which is too many for wide format. "
-                               f"Expected either 3 columns (Date,Ticker,Price) for long format or "
-                               f"<100 columns (Date + tickers) for wide format. "
-                               f"Please check your data format. Unable to auto-detect correct format.")
             else:
                 # Fallback: assume first column is date if no explicit date column found
                 logger.warning("No clear date column found, assuming first column is date")
-                col_mapping[df.columns[0]] = 'Date'
                 return self._process_wide_format(df, sector_filter)
     
     def _process_long_format(self, df, col_mapping, sector_filter):
@@ -542,6 +481,15 @@ class IntegratedUniversalBetaModel:
         wide_returns[ticker_cols] = wide_returns[ticker_cols].fillna(0)
         
         logger.info(f"Processed wide format data: {len(wide_returns)} dates, {len(ticker_cols)} tickers")
+        logger.info(f"Sample ticker columns: {ticker_cols[:10] if len(ticker_cols) > 10 else ticker_cols}")
+        logger.info(f"Date range: {wide_returns['Date'].min()} to {wide_returns['Date'].max()}")
+        
+        # Check for any obvious data quality issues
+        total_non_null = wide_returns[ticker_cols].notna().sum().sum()
+        total_cells = len(wide_returns) * len(ticker_cols)
+        data_completeness = total_non_null / total_cells if total_cells > 0 else 0
+        logger.info(f"Data completeness: {data_completeness:.1%} ({total_non_null:,} non-null values out of {total_cells:,})")
+        
         return wide_returns
     
     def create_market_features(self, wide_returns):
