@@ -9,8 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
-import ModelSelectionCard from "@/components/ModelSelectionCard";
-import type { ModelType } from "@/types/analysis";
 
 /**
  * Configure your API base:
@@ -21,7 +19,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [selectedModel, setSelectedModel] = useState<ModelType>("beta-forecasting");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +72,6 @@ export default function UploadPage() {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("model_type", selectedModel);
 
     try {
       const res = await api.post(
@@ -98,13 +94,11 @@ export default function UploadPage() {
       const msg = res.data?.message ?? "CSV Uploaded Successfully";
       const uploadId = res.data?.upload?.id;
 
-      setSuccessMsg(`${msg} - Model: ${selectedModel === 'mean-reversion' ? 'Mean-Reversion (MR-PROD)' : 'β-Forecasting'}`);
+      setSuccessMsg(`${msg} - Universal Beta Forecasting Model will be used`);
 
-      // Redirect after a short pause. Use /uploads since it already exists in your app.
+      // Redirect after a short pause to the data page where analysis can be run
       setTimeout(() => {
-        router.push("/uploads");
-        // or, if you later build a run page:
-        // router.push(`/runs/${uploadId}`);
+        router.push("/data");
       }, 600);
     } catch (e: any) {
       setUploading(false);
@@ -132,17 +126,21 @@ export default function UploadPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Upload Your Data</h1>
           <p className="text-gray-600">
-            Upload your CSV file containing stock price data for analysis
+            Upload your CSV file containing stock price data for Universal Beta Forecasting analysis
           </p>
+          <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-center gap-2 mb-2">
+              <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+              <span className="text-sm font-medium text-blue-800">Universal Beta Forecasting Model</span>
+            </div>
+            <p className="text-sm text-blue-700">
+              Our latest Universal Beta Forecasting model provides comprehensive market risk analysis 
+              with cross-sectional features and conformal prediction intervals for superior accuracy.
+            </p>
+          </div>
         </div>
 
         <div className="space-y-8">
-          {/* Model Selection */}
-          <ModelSelectionCard 
-            selectedModel={selectedModel} 
-            onModelChange={setSelectedModel} 
-          />
-          
           <div className="grid lg:grid-cols-2 gap-8">
             {/* Upload Section */}
             <Card>

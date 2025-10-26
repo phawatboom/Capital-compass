@@ -212,8 +212,8 @@ export default function UploadsPage() {
   };
 
     const handleAnalyze = (uploadId: number) => {
-      // Navigate to beta analysis platform with the file ID
-      router.push(`/dashboard/beta-analysis-platform?fileId=${uploadId}`);
+      // Navigate to new data page with the file ID for analysis
+      router.push(`/data?fileId=${uploadId}`);
     };
   const handleSelectAllOnPage = (checked: boolean) => {
     const next = new Set(selected);

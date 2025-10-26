@@ -42,12 +42,12 @@ from .views import (
 )
 
 # Universal model imports
-from .views_universal import (
-    ImportUniversalDataView,
-    UniversalBetaDashboardView,
-    UniversalBetaTimeSeriesView,
-    UniversalModelSummaryView,
-)
+# from .views_universal import (
+#     ImportUniversalDataView,
+#     UniversalBetaDashboardView,
+#     UniversalBetaTimeSeriesView,
+#     UniversalModelSummaryView,
+# )
 
 # Integrated workflow imports
 from .views_integrated import (
@@ -92,11 +92,11 @@ urlpatterns = [
     path("factors/shared/", factor_shared, name="factor-shared"),
     path("beta/timeseries/<str:ticker>/", beta_timeseries, name="beta_timeseries"),
     
-    # Universal Beta Model endpoints (PRIMARY for client use)
-    path('universal/import/', ImportUniversalDataView.as_view(), name='universal-import'),
-    path('universal/dashboard/', UniversalBetaDashboardView.as_view(), name='universal-dashboard'),
-    path('universal/timeseries/', UniversalBetaTimeSeriesView.as_view(), name='universal-timeseries'),
-    path('universal/summary/', UniversalModelSummaryView.as_view(), name='universal-summary'),
+    # Universal Beta Model endpoints (PRIMARY for client use) - Commented out until views_universal.py is created
+    # path('universal/import/', ImportUniversalDataView.as_view(), name='universal-import'),
+    # path('universal/dashboard/', UniversalBetaDashboardView.as_view(), name='universal-dashboard'),
+    # path('universal/timeseries/', UniversalBetaTimeSeriesView.as_view(), name='universal-timeseries'),
+    # path('universal/summary/', UniversalModelSummaryView.as_view(), name='universal-summary'),
     
     # Integrated Client Workflow endpoints (Upload -> Process -> View)
     path('integrated/upload/', IntegratedUploadView.as_view(), name='integrated-upload'),
@@ -106,10 +106,10 @@ urlpatterns = [
     path('integrated/clients/', ClientListView.as_view(), name='integrated-clients'),
     
     # Pooled Model API endpoints
-    path('api/', include(router.urls)),  # ViewSet routes
-    path('api/dashboard-summary/', dashboard_summary, name='dashboard-summary'),
-    path('api/stock-analysis/<str:ticker>/', stock_analysis, name='stock-analysis'),
-    path('api/time-series/<int:run_id>/<str:ticker>/', time_series_analysis, name='time-series-analysis'),
-    path('api/prediction-distribution/<int:run_id>/', prediction_distribution, name='prediction-distribution'),
-    path('api/save-analysis/', save_analysis_results, name='save-analysis-results'),
+    path('', include(router.urls)),  # ViewSet routes (includes analysis-runs/)
+    path('dashboard-summary/', dashboard_summary, name='dashboard-summary'),
+    path('stock-analysis/<str:ticker>/', stock_analysis, name='stock-analysis'),
+    path('time-series/<int:run_id>/<str:ticker>/', time_series_analysis, name='time-series-analysis'),
+    path('prediction-distribution/<int:run_id>/', prediction_distribution, name='prediction-distribution'),
+    path('save-analysis/', save_analysis_results, name='save-analysis-results'),
 ]

@@ -49,7 +49,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     crossSectionalRanking: 'true', // true/false
     // Advanced model parameters
     trainingDays: '252', // 1 year default
-    testingDays: '63', // 3 months default  
+    testingDays: '252', // 1 year default  
     alpha: '0.01', // L1/L2 regularization strength
     l1Ratio: '0.5', // ElasticNet mixing parameter (0=Ridge, 1=Lasso)
     multiPeriod: 'false' // Run predictions for all periods (1d, 5d, 10d, 20d)
@@ -77,26 +77,61 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       console.log('Fetching file meta for fileId:', fileId);
       
       // Fetch file information from the backend using the meta endpoint
-      const response = await api.get(`/csv-uploads/${fileId}/meta/`);
-      const fileInfo = response.data;
+      const metaResponse = await api.get(`/csv-uploads/${fileId}/meta/`);
+      const fileInfo = metaResponse.data;
       
       console.log('Received file info:', fileInfo);
-      
       setPreUploadedFileInfo(fileInfo);
-      setClientId(`file_${fileId}_${Date.now()}`);
-      setUploadState('uploaded');
-      setClientStatus({
-        status: 'uploaded',
-        filename: fileInfo.filename,
-        // Try multiple possible field names for row/column counts
-        n_rows: fileInfo.n_rows || fileInfo.rows || fileInfo.row_count || 0,
-        n_cols: fileInfo.n_cols || fileInfo.columns || fileInfo.column_count || 0
-      });
+
+      // Generate client ID for this session
+      const newClientId = `analysis_${fileId}_${Date.now()}`;
+      setClientId(newClientId);
       
-      console.log('Pre-uploaded file loaded successfully');
+      // Download the file and upload it to integrated workflow
+      console.log('Downloading file for integrated workflow...');
+      
+      try {
+        const downloadResponse = await api.get(`/csv-uploads/${fileId}/download/`, {
+          responseType: 'blob'
+        });
+        
+      const blob = downloadResponse.data;
+      const fileExtension = fileInfo.filename.split('.').pop()?.toLowerCase();
+      const mimeType = fileExtension === 'csv' ? 'text/csv' : 
+                      fileExtension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
+                      fileExtension === 'xls' ? 'application/vnd.ms-excel' : 'text/csv';
+      const file = new File([blob], fileInfo.filename, { type: mimeType });        console.log('File downloaded successfully, uploading to integrated workflow...');
+        
+        // Upload to integrated workflow
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('client_id', newClientId);
+
+        const uploadResponse = await api.post('/integrated/upload/', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (uploadResponse.data.status === 'success') {
+          setUploadState('uploaded');
+          setClientStatus({
+            status: 'uploaded',
+            filename: fileInfo.filename,
+            n_rows: uploadResponse.data.data.n_rows,
+            n_cols: uploadResponse.data.data.n_cols
+          });
+          console.log('File successfully uploaded to integrated workflow');
+        } else {
+          throw new Error(uploadResponse.data.message || 'Failed to upload to integrated workflow');
+        }
+      } catch (downloadError) {
+        console.error('Failed to download file:', downloadError);
+        // Fallback: Show error and let user upload manually
+        throw new Error('File not available for download. Please upload the file again.');
+      }
+      
     } catch (err) {
       console.error('Error loading pre-uploaded file:', err);
-      setError(`Failed to load pre-uploaded file information: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setError(err instanceof Error ? err.message : 'Failed to load file');
       setUploadState('error');
     }
   };
@@ -106,11 +141,14 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0];
-      if (file && file.name && file.name.endsWith('.csv')) {
-        setSelectedFile(file);
-        setError('');
-      } else {
-        setError('Please upload a CSV file only');
+      if (file && file.name) {
+        const fileName = file.name.toLowerCase();
+        if (fileName.endsWith('.csv') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+          setSelectedFile(file);
+          setError('');
+        } else {
+          setError('Please upload a CSV or Excel file (.csv, .xlsx, .xls)');
+        }
       }
     }
   }, []);
@@ -119,7 +157,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     onDrop,
     accept: {
       'text/csv': ['.csv'],
-      'application/vnd.ms-excel': ['.csv']
+      'application/vnd.ms-excel': ['.xls'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
     },
     multiple: false
   });
@@ -169,8 +208,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     setError('');
 
     try {
-      // Use different endpoint based on whether we have a pre-uploaded file or uploaded via the workflow
-      const endpoint = fileId ? '/integrated/run-model-with-file/' : '/integrated/run-model/';
+      // Always use the same endpoint - the integrated workflow handles both scenarios
+      const endpoint = '/integrated/run-model/';
       const payload: any = {
         client_id: clientId,
         horizon_days: parseInt(horizonDays),
@@ -188,11 +227,6 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
         l1_ratio: parseFloat(modelConfig.l1Ratio),
         multi_period: modelConfig.multiPeriod === 'true'
       };
-
-      // Add file ID if using pre-uploaded file
-      if (fileId) {
-        payload.file_id = fileId;
-      }
 
       const response = await api.post(endpoint, payload);
 
@@ -270,8 +304,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   };
 
   const navigateToDashboard = () => {
-    // Navigate to My Data page with dashboard tab active
-    router.push('/dashboard/my-data?tab=dashboard');
+    // Navigate to My Data page with analysis tab active
+    router.push('/data?tab=analysis');
   };
 
   const getStatusIcon = () => {
@@ -358,7 +392,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
           <CardDescription>
             {fileId 
               ? 'File selected from My Data - ready for analysis'
-              : 'Upload a CSV file with columns: Date, Ticker, Price (or Close/Adj_Close)'
+              : 'Upload a CSV or Excel file with columns: Date, Ticker, Price (or Date + ticker columns)'
             }
           </CardDescription>
         </CardHeader>
@@ -373,8 +407,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                     <p className="font-medium text-blue-900">Using Pre-uploaded File</p>
                     <p className="text-sm text-blue-700">{preUploadedFileInfo.filename}</p>
                     <p className="text-xs text-blue-600">
-                      {(preUploadedFileInfo.rows || preUploadedFileInfo.row_count || 0).toLocaleString()} rows, 
-                      {' '}{preUploadedFileInfo.columns || preUploadedFileInfo.column_count || 0} columns
+                      {clientStatus?.n_rows ? `${clientStatus.n_rows.toLocaleString()} rows, ${clientStatus.n_cols} columns` : 
+                       'File loaded from My Data'}
                     </p>
                   </div>
                 </div>
@@ -405,10 +439,10 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                 ) : (
                   <div>
                     <p className="text-sm text-gray-600">
-                      {isDragActive ? 'Drop the CSV file here' : 'Drag & drop a CSV file here, or click to select'}
+                      {isDragActive ? 'Drop the file here' : 'Drag & drop a CSV or Excel file here, or click to select'}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Expected format: Date, Ticker, Price columns
+                      Supported: CSV (.csv), Excel (.xlsx, .xls) | Expected: Date, Ticker, Price columns or Date + ticker columns
                     </p>
                   </div>
                 )}
@@ -638,10 +672,10 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                         <SelectValue placeholder="Select testing period" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="21">1 Month (21 days)</SelectItem>
-                        <SelectItem value="42">2 Months (42 days)</SelectItem>
-                        <SelectItem value="63">3 Months (63 days)</SelectItem>
-                        <SelectItem value="126">6 Months (126 days)</SelectItem>
+                        <SelectItem value="252">1 Year (252 days)</SelectItem>
+                        <SelectItem value="504">2 Years (504 days)</SelectItem>
+                        <SelectItem value="756">3 Years (756 days)</SelectItem>
+                        <SelectItem value="1008">4 Years (1008 days)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

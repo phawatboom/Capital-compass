@@ -120,6 +120,18 @@ ai_generated/
 **/.github/collections/
 **/.github/instructions/
 
+# Copilot workspace files (development only)
+chatmodes/
+collections/
+instructions/
+prompts/
+scripts/
+**chatmodes/
+**collections/
+**instructions/
+**prompts/
+**scripts/
+
 # Analysis and result files
 results/
 output/

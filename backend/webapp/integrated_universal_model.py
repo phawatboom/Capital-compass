@@ -1,424 +1,867 @@
 # integrated_universal_model.py
 """
-Integrated Universal Beta Model for client data uploads
-This allows clients to upload their own data and run the universal model
+Integrated Universal Beta Model for client data uploads using optimized model_no_csv.py
+This allows clients to upload their own data and run the universal model with database integration
 """
 
 import os
+import sys
+import logging
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import ElasticNet
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import TimeSeriesSplit
-import joblib
-from datetime import datetime, timedelta
-import logging
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Optional, List
+
+# Django imports
+from django.conf import settings
+from django.utils import timezone
+from django.contrib.auth.models import User
+
+# Import database models
+from .models import (
+    AnalysisRun, ModelCoefficient, StockPrediction, 
+    StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics
+)
 
 logger = logging.getLogger(__name__)
 
+def _coerce_date(df: pd.DataFrame, col="Date") -> pd.DataFrame:
+    """Convert date column to datetime and clean the dataframe"""
+    out = df.copy()
+    out[col] = pd.to_datetime(out[col], errors="coerce", infer_datetime_format=True)
+    out = out.dropna(subset=[col]).sort_values(col).reset_index(drop=True)
+    return out
+
+def _clean_numeric(x):
+    """Clean numeric values, handling percentages and string formatting"""
+    if isinstance(x, str):
+        s = x.strip().replace(",", "")
+        if s == "": 
+            return np.nan
+        if s.endswith("%"):
+            try: 
+                return float(s[:-1]) / 100.0
+            except: 
+                return np.nan
+        try: 
+            return float(s)
+        except: 
+            return np.nan
+    return x
+
+def load_mxus_returns(xlsx_path: str, sheet: str = "Returns") -> pd.DataFrame:
+    """
+    Robust loader for MXUS_Data.xlsx / 'Returns' where the true header row may be below row 1.
+    - Finds the first row containing 'Date' (case-insensitive) and uses it as header.
+    - Converts percent strings like '0.79%' → 0.0079
+    """
+    raw = pd.read_excel(xlsx_path, sheet_name=sheet, header=None, dtype=object)
+
+    header_row = None
+    scan_rows = min(50, len(raw))
+    for i in range(scan_rows):
+        row = raw.iloc[i].astype(str).str.strip()
+        if row.str.lower().eq("date").any():
+            header_row = i
+            break
+    if header_row is None:
+        raise KeyError("Could not find a header row containing 'Date' in the sheet.")
+
+    cols = raw.iloc[header_row].astype(str).str.strip().tolist()
+    df = raw.iloc[header_row + 1:].copy()
+    df.columns = cols
+    df = df.loc[:, ~(df.isna().all())]
+
+    # find/rename Date
+    date_col = None
+    for c in df.columns:
+        if str(c).strip().lower() == "date":
+            date_col = c
+            break
+    if date_col is None:
+        for c in df.columns:
+            if "date" in str(c).strip().lower():
+                date_col = c
+                break
+    if date_col is None:
+        raise KeyError("Found header row but no column named 'Date'.")
+
+    if date_col != "Date":
+        df = df.rename(columns={date_col: "Date"})
+
+    # convert values
+    for c in df.columns:
+        if c != "Date":
+            df[c] = df[c].map(_clean_numeric)
+
+    return _coerce_date(df, "Date")
+
+# Add the Data Analysis directory to Python path for model access
+sys.path.append(os.path.join(settings.BASE_DIR.parent, "Data Analysis"))
+
+# Try to import optimized model functions
+try:
+    from model_no_csv import (
+        _coerce_date,
+        load_mxus_returns, 
+        run_pipeline_for_horizon,
+        aggregate_to_period_returns,
+        rich_features_from_returns,
+        _cs_percentile_rank_wide,
+        add_cross_sectional_ranks
+    )
+    MODEL_AVAILABLE = True
+    logger.info("Successfully imported optimized model functions from model_no_csv.py")
+except ImportError as e:
+    MODEL_AVAILABLE = False
+    logger.error(f"Failed to import optimized model functions: {e}")
+    logger.error("Will use fallback mode - limited functionality available")
+
+
 class IntegratedUniversalBetaModel:
     """
-    Universal Beta Model that can run on client-uploaded data
-    Integrates data processing, model training, and prediction generation
+    Universal Beta Model that can run on client-uploaded data using the optimized model_no_csv.py
+    Integrates data processing, model training, prediction generation, and database storage
     """
     
     def __init__(self, output_dir=None, alpha=0.01, l1_ratio=0.5):
-        self.output_dir = output_dir or "client_outputs"
-        self.scaler = StandardScaler()
-        self.model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
+        self.output_dir = output_dir or os.path.join(settings.MEDIA_ROOT, 'model_outputs')
         self.alpha = alpha
         self.l1_ratio = l1_ratio
-        self.feature_columns = [
-            'train_b', 'lag_train_b', 'ar1_corr_10d', 'ar1_corr_20d', 'ar1_corr_60d',
-            'sign_persist_20d', 'sign_persist_60d', 'ret_1d', 'ret_5d', 'ret_20d',
-            'vol_63d', 'vol_126d', 'vol_252d', 'vol_756d', 'Z_ma_20d',
-            'cs_rank_ret_1d', 'cs_rank_ret_5d', 'cs_rank_ret_20d', 'cs_rank_z_ma_20d',
-            'cs_rank_vol_63d', 'cs_rank_vol_126d', 'cs_rank_vol_252d', 'cs_rank_vol_756d',
-            'xsec_disp_30d'
-        ]
+        
+        # Fixed parameters for the optimized model (matching model_no_csv.py defaults)
+        # UPDATED: Changed base_test_len_days from 252 to 256 as requested
+        self.fixed_params = {
+            'base_train_len_days': 756,   # ~3 years
+            'base_test_len_days': 256,    # ~1 year (updated to 256 days)
+            'enet_alpha': alpha,
+            'enet_l1_ratio': l1_ratio,
+            'oos_min_train_rows_fixed': 5000
+        }
+        
+        # Ensure output directory exists
+        os.makedirs(self.output_dir, exist_ok=True)
     
     def process_uploaded_data(self, csv_file_path, sector_filter='all'):
         """
-        Process client-uploaded CSV data
-        Expected format: Date, Ticker, Price (or similar)
-        Optional: Sector column for filtering
+        Process client-uploaded data (CSV or Excel) into the format expected by the optimized model
+        Handles both wide format (Date + ticker columns) and long format (Date, Ticker, Price)
+        Supports CSV files and Excel files with MXUS-style formatting
+        Returns: processed DataFrame in wide format (Date + ticker columns)
         """
         try:
-            # Read uploaded data
-            df = pd.read_csv(csv_file_path)
+            # Read uploaded data with multiple encoding attempts and file type detection
+            logger.info(f"Processing uploaded data: {csv_file_path}")
             
-            # Standardize column names
-            df.columns = df.columns.str.lower().str.strip()
+            file_extension = csv_file_path.lower().split('.')[-1]
             
-            # Expected columns: date, ticker, price (adjust_close, close, etc.)
-            if 'date' not in df.columns:
-                # Try common date column names
-                date_cols = ['Date', 'DATE', 'trading_date', 'trade_date']
-                for col in date_cols:
-                    if col.lower() in df.columns:
-                        df['date'] = df[col.lower()]
-                        break
+            if file_extension == 'csv':
+                # CSV file processing
+                try:
+                    df = pd.read_csv(csv_file_path, encoding='utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        df = pd.read_csv(csv_file_path, encoding='latin-1')
+                    except UnicodeDecodeError:
+                        df = pd.read_csv(csv_file_path, encoding='cp1252')
             
-            if 'ticker' not in df.columns:
-                # Try common ticker column names
-                ticker_cols = ['Ticker', 'TICKER', 'symbol', 'Symbol', 'stock']
-                for col in ticker_cols:
-                    if col.lower() in df.columns:
-                        df['ticker'] = df[col.lower()]
-                        break
+            elif file_extension in ['xlsx', 'xls']:
+                # Excel file processing with robust MXUS-style loading
+                try:
+                    # First try standard Excel read
+                    df = pd.read_excel(csv_file_path)
+                    logger.info(f"Standard Excel read successful")
+                except Exception as e:
+                    logger.info(f"Standard Excel read failed, trying MXUS-style loading: {e}")
+                    try:
+                        # Try MXUS-style loading for 'Returns' sheet
+                        df = load_mxus_returns(csv_file_path, sheet="Returns")
+                        logger.info(f"MXUS-style loading successful")
+                    except Exception as e2:
+                        logger.info(f"MXUS Returns sheet failed, trying first sheet: {e2}")
+                        # Fallback: try first sheet with robust header detection
+                        raw = pd.read_excel(csv_file_path, header=None, dtype=object)
+                        header_row = None
+                        scan_rows = min(10, len(raw))
+                        for i in range(scan_rows):
+                            row = raw.iloc[i].astype(str).str.strip()
+                            if any(word in row.str.lower().values for word in ['date', 'time', 'period']):
+                                header_row = i
+                                break
+                        
+                        if header_row is not None:
+                            cols = raw.iloc[header_row].astype(str).str.strip().tolist()
+                            df = raw.iloc[header_row + 1:].copy()
+                            df.columns = cols
+                            df = df.loc[:, ~(df.isna().all())]
+                            # Clean numeric columns
+                            for c in df.columns:
+                                if not any(word in str(c).lower() for word in ['date', 'time', 'period']):
+                                    df[c] = df[c].map(_clean_numeric)
+                        else:
+                            raise ValueError("Could not find valid header row in Excel file")
+            else:
+                raise ValueError(f"Unsupported file format: {file_extension}")
             
-            # Price column
-            price_col = None
-            for col in ['adj_close', 'adjusted_close', 'close', 'price']:
-                if col in df.columns:
-                    price_col = col
-                    break
+            logger.info(f"Loaded data with {len(df)} rows and columns: {df.columns.tolist()}")
             
-            if not price_col:
-                raise ValueError("No price column found. Expected: adj_close, close, or price")
+            # Basic validation
+            if len(df) == 0:
+                raise ValueError("Empty dataset uploaded")
             
-            df['price'] = df[price_col]
+            if len(df.columns) < 2:
+                raise ValueError("Dataset must have at least 2 columns")
             
-            # Convert date column
-            df['date'] = pd.to_datetime(df['date'])
+            # Show sample of first few rows for debugging
+            logger.info("Sample data (first 3 rows):")
+            for i in range(min(3, len(df))):
+                row_sample = {k: v for k, v in df.iloc[i].head(10).to_dict().items()}
+                logger.info(f"  Row {i}: {row_sample}")
             
-            # Apply sector filtering if sector column exists and filter is specified
-            if sector_filter != 'all' and 'sector' in df.columns:
-                original_count = len(df)
-                df = df[df['sector'].str.lower() == sector_filter.lower()]
-                logger.info(f"Sector filter '{sector_filter}' applied: {original_count} -> {len(df)} rows")
-            elif sector_filter != 'all' and 'sector' not in df.columns:
-                logger.warning(f"Sector filter '{sector_filter}' requested but no 'sector' column found")
+            # Detect format and process accordingly
+            result = self._detect_and_process_format(df, sector_filter)
             
-            # Sort by ticker and date
-            df = df.sort_values(['ticker', 'date'])
+            if result is None or result.empty:
+                raise ValueError("No valid data after processing - format detection failed")
             
-            logger.info(f"Processed {len(df)} rows, {df['ticker'].nunique()} unique tickers")
-            return df[['date', 'ticker', 'price']]
+            logger.info(f"Successfully processed data: {len(result)} rows, {len(result.columns)} columns")
+            return result
             
         except Exception as e:
             logger.error(f"Error processing uploaded data: {str(e)}")
+            logger.error(traceback.format_exc())
+            
+            # Provide more specific error messages
+            if "No Date column found" in str(e):
+                available_cols = df.columns.tolist()[:10] if 'df' in locals() and df is not None else "unknown"
+                error_msg = f"No date column found. Available columns: {available_cols}. Please ensure your data has a Date column or the first column contains dates."
+            elif "Could not parse date column" in str(e):
+                error_msg = f"Cannot parse dates in the date column. Please ensure dates are in a standard format (YYYY-MM-DD, MM/DD/YYYY, etc.)"
+            elif "Empty dataset" in str(e):
+                error_msg = "The uploaded file appears to be empty or contains no valid data."
+            else:
+                error_msg = f"Data processing failed: {str(e)}"
+            
+            raise ValueError(error_msg)
+
+    def _detect_and_process_format(self, df, sector_filter):
+        """Helper method to detect data format and process accordingly"""
+        # Standardize column names (case-insensitive)
+        df.columns = df.columns.str.strip()
+        col_mapping = {}
+        
+        # Check if this is long format data with more flexible column detection
+        has_date_col = False
+        has_ticker_col = False
+        has_price_col = False
+        
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            # More flexible date column detection
+            if any(date_word in col_lower for date_word in ['date', 'time', 'period']):
+                col_mapping[col] = 'Date'
+                has_date_col = True
+            # More flexible ticker column detection  
+            elif any(ticker_word in col_lower for ticker_word in ['ticker', 'symbol', 'stock', 'company', 'name']):
+                col_mapping[col] = 'Ticker'
+                has_ticker_col = True
+            # More flexible price column detection
+            elif any(price_word in col_lower for price_word in ['price', 'close', 'adj_close', 'adjusted_close', 'value', 'return']):
+                col_mapping[col] = 'Price'
+                has_price_col = True
+            elif any(sector_word in col_lower for sector_word in ['sector', 'industry', 'category']):
+                col_mapping[col] = 'Sector'
+        
+        logger.info(f"Column detection results: Date={has_date_col}, Ticker={has_ticker_col}, Price={has_price_col}")
+        logger.info(f"Column mapping: {col_mapping}")
+        logger.info(f"Total columns: {len(df.columns)}")
+        
+        # Emergency override for large column counts (likely misdetection)
+        if len(df.columns) > 100:
+            logger.warning(f"Large column count ({len(df.columns)}) detected - forcing long format check")
+            
+            # Force re-examination with looser criteria for long format
+            if not (has_date_col and has_ticker_col and has_price_col):
+                logger.info("Re-examining columns with looser criteria for large dataset...")
+                
+                # Look for any column that might contain identifiers (tickers)
+                potential_ticker_col = None
+                potential_price_col = None
+                
+                for col in df.columns[:10]:  # Check first 10 columns
+                    sample_values = df[col].dropna().head(20).astype(str)
+                    
+                    # Check if column contains stock-like identifiers
+                    if not has_ticker_col and sample_values.str.len().median() <= 6:  # Short strings like "AAPL"
+                        if sample_values.str.match(r'^[A-Z]{1,6}$').sum() > len(sample_values) * 0.3:  # 30% match ticker pattern
+                            logger.info(f"Found potential ticker column: {col}")
+                            col_mapping[col] = 'Ticker'
+                            has_ticker_col = True
+                            potential_ticker_col = col
+                    
+                    # Check if column contains numeric price-like data
+                    if not has_price_col and col != potential_ticker_col:
+                        try:
+                            numeric_sample = pd.to_numeric(sample_values, errors='coerce')
+                            if numeric_sample.notna().sum() > len(sample_values) * 0.7:  # 70% numeric
+                                logger.info(f"Found potential price column: {col}")
+                                col_mapping[col] = 'Price'
+                                has_price_col = True
+                        except:
+                            pass
+                
+                # Additional fallback: try common column names
+                if not has_ticker_col:
+                    for col in df.columns[:20]:
+                        if any(word in col.lower() for word in ['symbol', 'ticker', 'stock', 'security', 'id']):
+                            logger.info(f"Found ticker column by name pattern: {col}")
+                            col_mapping[col] = 'Ticker'
+                            has_ticker_col = True
+                            break
+                
+                if not has_price_col:
+                    for col in df.columns[:20]:
+                        if any(word in col.lower() for word in ['price', 'close', 'value', 'return', 'ret']):
+                            logger.info(f"Found price column by name pattern: {col}")
+                            col_mapping[col] = 'Price'
+                            has_price_col = True
+                            break
+        
+        # If we have all three columns, this is long format
+        if has_date_col and has_ticker_col and has_price_col:
+            logger.info("Detected long format data (Date, Ticker, Price)")
+            return self._process_long_format(df, col_mapping, sector_filter)
+        else:
+            # For wide format, we need at least a date column and some numeric columns
+            if has_date_col and len(df.columns) <= 100:  # Reasonable number of columns for wide format
+                logger.info("Detected wide format data (Date + ticker columns)")
+                return self._process_wide_format(df, sector_filter)
+            elif len(df.columns) > 100:
+                # Too many columns for wide format - try to force long format processing
+                logger.error(f"Dataset has {len(df.columns)} columns which is too many for wide format.")
+                
+                # Last resort: try to guess long format columns from first few columns
+                if len(df.columns) >= 3:
+                    logger.info("Attempting emergency long format detection with first 3 columns...")
+                    emergency_mapping = {
+                        df.columns[0]: 'Date',  # Assume first column is date
+                        df.columns[1]: 'Ticker',  # Assume second is ticker
+                        df.columns[2]: 'Price'   # Assume third is price
+                    }
+                    logger.info(f"Emergency mapping: {emergency_mapping}")
+                    
+                    try:
+                        return self._process_long_format(df, emergency_mapping, sector_filter)
+                    except Exception as e:
+                        logger.error(f"Emergency long format processing failed: {e}")
+                
+                raise ValueError(f"Dataset has {len(df.columns)} columns which is too many for wide format. "
+                               f"Expected either 3 columns (Date,Ticker,Price) for long format or "
+                               f"<100 columns (Date + tickers) for wide format. "
+                               f"Please check your data format. Unable to auto-detect correct format.")
+            else:
+                # Fallback: assume first column is date if no explicit date column found
+                logger.warning("No clear date column found, assuming first column is date")
+                col_mapping[df.columns[0]] = 'Date'
+                return self._process_wide_format(df, sector_filter)
+    
+    def _process_long_format(self, df, col_mapping, sector_filter):
+        """Process long format data (Date, Ticker, Price)"""
+        df = df.rename(columns=col_mapping)
+        
+        # Validate required columns
+        if 'Date' not in df.columns:
+            raise ValueError("No Date column found in long format data")
+        if 'Ticker' not in df.columns:
+            raise ValueError("No Ticker column found in long format data")
+        if 'Price' not in df.columns:
+            raise ValueError("No Price column found in long format data")
+        
+        # Convert Date column
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df = df.dropna(subset=['Date']).sort_values('Date').reset_index(drop=True)
+        
+        # Convert Price to numeric
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+        df = df.dropna(subset=['Price'])
+        
+        # Apply sector filter if specified and available
+        if sector_filter != 'all' and 'Sector' in df.columns:
+            df = df[df['Sector'].str.lower() == sector_filter.lower()]
+            logger.info(f"Applied sector filter '{sector_filter}', {len(df)} rows remaining")
+        
+        # Calculate returns from prices
+        df = df.sort_values(['Ticker', 'Date']).reset_index(drop=True)
+        df['Return'] = df.groupby('Ticker')['Price'].pct_change()
+        df = df.dropna(subset=['Return'])
+        
+        # Convert to wide format (Date + ticker columns with returns)
+        wide_returns = df.pivot(index='Date', columns='Ticker', values='Return').reset_index()
+        wide_returns = wide_returns.sort_values('Date').reset_index(drop=True)
+        
+        # Fill missing values with 0 (assuming no trading = 0 return)
+        ticker_cols = [col for col in wide_returns.columns if col != 'Date']
+        wide_returns[ticker_cols] = wide_returns[ticker_cols].fillna(0)
+        
+        logger.info(f"Processed long format data: {len(wide_returns)} dates, {len(ticker_cols)} tickers")
+        return wide_returns
+    
+    def _process_wide_format(self, df, sector_filter):
+        """Process wide format data (Date + ticker columns with prices/returns)"""
+        # Look for date column (case insensitive)
+        date_col = None
+        for col in df.columns:
+            if col.lower() in ['date', 'dates', 'time', 'timestamp']:
+                date_col = col
+                break
+        
+        if date_col is None:
+            # If no date column found, assume first column is date
+            date_col = df.columns[0]
+            logger.warning(f"No clear date column found, using first column '{date_col}' as date")
+        
+        # Convert date column
+        try:
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+            df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
+        except:
+            raise ValueError(f"Could not parse date column '{date_col}'")
+        
+        # Rename date column to standard name
+        if date_col != 'Date':
+            df = df.rename(columns={date_col: 'Date'})
+        
+        # Get ticker columns (all non-date columns, but exclude obvious metadata columns)
+        potential_ticker_cols = [col for col in df.columns if col != 'Date']
+        
+        # Filter out non-numeric columns that are clearly not stock data
+        ticker_cols = []
+        excluded_cols = []
+        
+        for col in potential_ticker_cols:
+            col_lower = col.lower().strip()
+            # Skip obvious metadata columns
+            if any(meta_word in col_lower for meta_word in ['id', 'name', 'description', 'sector', 'industry', 'market', 'exchange', 'currency', 'index']):
+                excluded_cols.append(col)
+                continue
+            
+            # Try to convert a sample to see if it's numeric
+            sample_values = df[col].dropna().head(10)
+            if len(sample_values) == 0:
+                excluded_cols.append(col)
+                continue
+                
+            # Check if values can be converted to numeric
+            try:
+                numeric_sample = pd.to_numeric(sample_values, errors='coerce')
+                if numeric_sample.notna().sum() > len(sample_values) * 0.5:  # At least 50% numeric
+                    ticker_cols.append(col)
+                else:
+                    excluded_cols.append(col)
+            except:
+                excluded_cols.append(col)
+        
+        logger.info(f"Identified {len(ticker_cols)} potential ticker columns from {len(potential_ticker_cols)} total columns")
+        if excluded_cols:
+            logger.info(f"Excluded non-numeric columns: {excluded_cols[:10]}{'...' if len(excluded_cols) > 10 else ''}")
+        
+        if len(ticker_cols) == 0:
+            # Provide detailed diagnostic information
+            logger.error("=" * 50)
+            logger.error("DETAILED DIAGNOSTIC INFORMATION")
+            logger.error("=" * 50)
+            logger.error(f"Total columns analyzed: {len(potential_ticker_cols)}")
+            logger.error(f"Date column: {date_col}")
+            logger.error(f"Potential ticker columns: {potential_ticker_cols[:20]}...")  # First 20
+            
+            # Show sample data from first few columns
+            for i, col in enumerate(potential_ticker_cols[:5]):
+                sample = df[col].dropna().head(5).tolist()
+                logger.error(f"Column {col}: {sample}")
+            
+            logger.error(f"Excluded columns (first 20): {excluded_cols[:20]}")
+            logger.error("This suggests the data might be in long format but was misdetected as wide format.")
+            logger.error("For wide format, expected: Date column + numeric ticker columns")
+            logger.error("For long format, expected: Date, Ticker, Price columns")
+            logger.error("=" * 50)
+            
+            raise ValueError(f"No valid ticker columns found in wide format data. "
+                           f"Analyzed {len(potential_ticker_cols)} columns, all appear to be non-numeric or metadata. "
+                           f"With {len(df.columns)} total columns, this might be long format data misdetected as wide format. "
+                           f"Please check the data structure: expected either 3 columns (Date,Ticker,Price) or "
+                           f"Date + <100 numeric ticker columns.")
+        
+        # Convert ticker columns to numeric with better error handling
+        logger.info(f"Converting {len(ticker_cols)} ticker columns to numeric: {ticker_cols[:5]}...")
+        
+        numeric_conversion_success = {}
+        for col in ticker_cols:
+            original_type = df[col].dtype
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            non_null_count = df[col].notna().sum()
+            numeric_conversion_success[col] = non_null_count
+            logger.debug(f"Column {col}: {original_type} -> numeric, {non_null_count} valid values")
+        
+        # Check if any columns have valid numeric data
+        total_valid_values = sum(numeric_conversion_success.values())
+        if total_valid_values == 0:
+            logger.error("No valid numeric data found after conversion. Column details:")
+            for col in ticker_cols[:10]:  # Show first 10 columns
+                sample_values = df[col].head().tolist()
+                logger.error(f"  {col}: {sample_values}")
+            raise ValueError(f"No valid numeric data found in ticker columns. Checked {len(ticker_cols)} columns.")
+        
+        logger.info(f"Successfully converted to numeric with {total_valid_values} total valid values")
+        
+        # Check if data looks like prices (generally increasing) or returns (around 0)
+        # Simple heuristic: if most values are between -1 and 1, assume returns
+        sample_data = df[ticker_cols].values.flatten()
+        sample_data = sample_data[~pd.isna(sample_data)]
+        
+        if len(sample_data) > 0:
+            pct_in_return_range = np.mean((sample_data >= -1) & (sample_data <= 1))
+            
+            if pct_in_return_range > 0.8:
+                logger.info("Data appears to be returns, using directly")
+                # Data is already returns
+                wide_returns = df.copy()
+            else:
+                logger.info("Data appears to be prices, calculating returns")
+                # Data is prices, calculate returns
+                wide_returns = df.copy()
+                for col in ticker_cols:
+                    wide_returns[col] = df[col].pct_change()
+                # Drop first row with NaN returns
+                wide_returns = wide_returns.dropna(subset=ticker_cols, how='all')
+        else:
+            raise ValueError(f"No valid numeric data found in ticker columns after processing {len(ticker_cols)} columns")
+        
+        # Fill missing values with 0
+        wide_returns[ticker_cols] = wide_returns[ticker_cols].fillna(0)
+        
+        logger.info(f"Processed wide format data: {len(wide_returns)} dates, {len(ticker_cols)} tickers")
+        return wide_returns
+    
+    def create_market_features(self, wide_returns):
+        """
+        Create market-wide features from the returns data
+        """
+        try:
+            market_features = pd.DataFrame(index=wide_returns['Date'])
+            market_features.index.name = "Date"
+            
+            # Cross-sectional dispersion (30d rolling average of daily cross-sectional std)
+            ticker_cols = [col for col in wide_returns.columns if col != 'Date']
+            
+            if len(ticker_cols) > 1:
+                xsec_disp_1d = wide_returns[ticker_cols].std(axis=1)
+                xsec_disp_30d = xsec_disp_1d.rolling(30, min_periods=10).mean()
+                market_features['xsec_disp_30d'] = xsec_disp_30d.values
+            else:
+                # If only one ticker, set to zero
+                market_features['xsec_disp_30d'] = 0.0
+            
+            market_features = market_features.reset_index()
+            logger.info(f"Created market features with {len(market_features)} rows")
+            return market_features
+            
+        except Exception as e:
+            logger.error(f"Error creating market features: {str(e)}")
             raise
     
-    def calculate_features(self, df):
-        """Calculate all features needed for the universal model"""
+    def run_model_pipeline(self, wide_returns, market_features, horizon_days=10):
+        """
+        Run the optimized model pipeline for a single horizon
+        Returns dictionary with model results ready for database storage
+        """
+        if not MODEL_AVAILABLE:
+            raise RuntimeError("Optimized model functions not available. Check import errors.")
         
-        def calculate_stock_features(stock_df):
-            """Calculate features for a single stock"""
-            stock_df = stock_df.sort_values('date')
-            stock_df['return'] = stock_df['price'].pct_change()
+        try:
+            ticker_cols = [col for col in wide_returns.columns if col != 'Date']
+            logger.info(f"Running model pipeline for {len(ticker_cols)} tickers, horizon {horizon_days}d")
             
-            # Historical beta (using SPY proxy - calculate vs market)
-            stock_df['train_b'] = stock_df['return'].rolling(63).std() * 1.2  # Simplified beta proxy
-            stock_df['lag_train_b'] = stock_df['train_b'].shift(1)
-            
-            # Autocorrelation features
-            stock_df['ar1_corr_10d'] = stock_df['return'].rolling(10).apply(
-                lambda x: x.autocorr(lag=1) if len(x) > 1 else 0
-            )
-            stock_df['ar1_corr_20d'] = stock_df['return'].rolling(20).apply(
-                lambda x: x.autocorr(lag=1) if len(x) > 1 else 0
-            )
-            stock_df['ar1_corr_60d'] = stock_df['return'].rolling(60).apply(
-                lambda x: x.autocorr(lag=1) if len(x) > 1 else 0
-            )
-            
-            # Sign persistence
-            stock_df['sign_persist_20d'] = (
-                stock_df['return'].rolling(20).apply(lambda x: (x > 0).mean())
-            )
-            stock_df['sign_persist_60d'] = (
-                stock_df['return'].rolling(60).apply(lambda x: (x > 0).mean())
+            # Run the optimized pipeline
+            result = run_pipeline_for_horizon(
+                horizon=horizon_days,
+                mxus_returns_data=wide_returns,
+                market_features_data=market_features,
+                all_tickers=ticker_cols,
+                max_workers_data_prep=2,  # Reduced for server environment
+                fixed_params=self.fixed_params
             )
             
-            # Return features
-            stock_df['ret_1d'] = stock_df['return']
-            stock_df['ret_5d'] = stock_df['return'].rolling(5).sum()
-            stock_df['ret_20d'] = stock_df['return'].rolling(20).sum()
+            if 'error' in result:
+                raise RuntimeError(f"Model pipeline failed: {result['error']}")
             
-            # Volatility features
-            stock_df['vol_63d'] = stock_df['return'].rolling(63).std()
-            stock_df['vol_126d'] = stock_df['return'].rolling(126).std()
-            stock_df['vol_252d'] = stock_df['return'].rolling(252).std()
-            stock_df['vol_756d'] = stock_df['return'].rolling(756).std()
+            logger.info(f"Model pipeline completed successfully for horizon {horizon_days}d")
+            return result
             
-            # Moving average Z-score
-            ma_20 = stock_df['price'].rolling(20).mean()
-            ma_std = stock_df['price'].rolling(20).std()
-            stock_df['Z_ma_20d'] = (stock_df['price'] - ma_20) / ma_std
-            
-            return stock_df
-        
-        # Calculate features for each stock
-        all_stocks = []
-        for ticker in df['ticker'].unique():
-            stock_data = df[df['ticker'] == ticker].copy()
-            stock_features = calculate_stock_features(stock_data)
-            all_stocks.append(stock_features)
-        
-        feature_df = pd.concat(all_stocks, ignore_index=True)
-        
-        # Calculate cross-sectional rankings
-        date_groups = feature_df.groupby('date')
-        
-        for col in ['ret_1d', 'ret_5d', 'ret_20d', 'Z_ma_20d', 'vol_63d', 'vol_126d', 'vol_252d', 'vol_756d']:
-            if col in feature_df.columns:
-                # Create cs_rank columns with lowercase names to match feature_columns list
-                rank_col_name = f'cs_rank_{col}'.lower()
-                feature_df[rank_col_name] = date_groups[col].rank(pct=True)
-        
-        # Cross-sectional dispersion
-        feature_df['xsec_disp_30d'] = date_groups['return'].transform('std')
-        
-        # Remove rows with insufficient data
-        feature_df = feature_df.dropna(subset=self.feature_columns)
-        
-        logger.info(f"Calculated features for {len(feature_df)} observations")
-        return feature_df
+        except Exception as e:
+            logger.error(f"Error in model pipeline: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
     
-    def train_and_predict(self, feature_df, horizon_days=10, training_days=252, testing_days=63):
-        """Train the universal model and generate predictions"""
-        
-        # Prepare target variable (future beta)
-        feature_df = feature_df.sort_values(['ticker', 'date'])
-        feature_df['future_beta'] = feature_df.groupby('ticker')['train_b'].shift(-horizon_days)
-        
-        # Remove rows without target
-        model_df = feature_df.dropna(subset=['future_beta'])
-        
-        if len(model_df) < 100:
-            raise ValueError(f"Insufficient data for training. Need at least 100 observations, got {len(model_df)}")
-        
-        # Features and target
-        X = model_df[self.feature_columns]
-        y = model_df['future_beta']
-        
-        # Use specific training/testing periods instead of simple percentage split
-        # Sort by date to ensure proper time series split
-        model_df = model_df.sort_values('date')
-        
-        # Calculate split point based on training/testing days
-        total_days_needed = training_days + testing_days
-        if len(model_df) < total_days_needed:
-            logger.warning(f"Insufficient data for specified training/testing split. Using time series split instead.")
-            # Fallback to time series split
-            tscv = TimeSeriesSplit(n_splits=3)
-            split_idx = list(tscv.split(X))[-1]
-            train_idx, test_idx = split_idx
-        else:
-            # Use the most recent data for testing
-            test_start_idx = len(model_df) - testing_days
-            train_end_idx = test_start_idx
-            train_start_idx = max(0, train_end_idx - training_days)
+    def save_results_to_database(self, model_results, user=None, run_name=None):
+        """
+        Save model results directly to database using Django models
+        """
+        try:
+            if user is None:
+                # Get or create system user for background tasks
+                user, created = User.objects.get_or_create(
+                    username='system_model_runner',
+                    defaults={'email': 'system@example.com', 'is_active': True}
+                )
             
-            train_idx = list(range(train_start_idx, train_end_idx))
-            test_idx = list(range(test_start_idx, len(model_df)))
+            horizon = model_results.get('horizon', 10)
+            if run_name is None:
+                run_name = f"Universal_Model_{horizon}d_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            logger.info(f"Using training period: {training_days} days ({len(train_idx)} samples)")
-            logger.info(f"Using testing period: {testing_days} days ({len(test_idx)} samples)")
-        
-        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-        
-        # Scale features
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
-        
-        # Train model
-        self.model.fit(X_train_scaled, y_train)
-        
-        # Generate predictions
-        train_pred = self.model.predict(X_train_scaled)
-        test_pred = self.model.predict(X_test_scaled)
-        
-        # Calculate metrics
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-        
-        train_mae = mean_absolute_error(y_train, train_pred)
-        test_mae = mean_absolute_error(y_test, test_pred)
-        train_r2 = r2_score(y_train, train_pred)
-        test_r2 = r2_score(y_test, test_pred)
-        
-        # Directional accuracy
-        train_dir_acc = np.mean(np.sign(y_train) == np.sign(train_pred))
-        test_dir_acc = np.mean(np.sign(y_test) == np.sign(test_pred))
-        
-        # Prepare final predictions for the most recent data
-        latest_data = feature_df.groupby('ticker').tail(1)
-        if len(latest_data) > 0:
-            X_latest = latest_data[self.feature_columns]
-            X_latest_scaled = self.scaler.transform(X_latest)
-            latest_predictions = self.model.predict(X_latest_scaled)
+            # Extract metrics from model results
+            oos_metrics = model_results.get('oos_metrics', {})
             
-            # Create final predictions dataframe
-            final_predictions = latest_data[['ticker', 'date'] + self.feature_columns].copy()
-            final_predictions['final_prediction'] = latest_predictions
-            final_predictions['horizon_days'] = horizon_days
-        else:
-            final_predictions = pd.DataFrame()
-        
-        results = {
-            'final_predictions': final_predictions,
-            'model_performance': {
-                'train_mae': train_mae,
-                'test_mae': test_mae,
-                'train_r2': train_r2,
-                'test_r2': test_r2,
-                'train_dir_acc': train_dir_acc,
-                'test_dir_acc': test_dir_acc,
-                'n_train': len(X_train),
-                'n_test': len(X_test),
-                'n_features': len(self.feature_columns),
-                'horizon_days': horizon_days
-            },
-            'feature_importance': dict(zip(self.feature_columns, self.model.coef_))
-        }
-        
-        logger.info(f"Model training complete. Test R²: {test_r2:.4f}, Test MAE: {test_mae:.4f}")
-        return results
+            # Create analysis run record
+            analysis_run = AnalysisRun.objects.create(
+                user=user,
+                run_name=run_name,
+                model_type='universal_enet_optimized',
+                horizon_days=horizon,
+                status='completed',
+                completed_at=timezone.now(),
+                # Overall metrics
+                mae=oos_metrics.get('MAE'),
+                rmse=oos_metrics.get('RMSE'),
+                directional_accuracy=oos_metrics.get('DirectionalAcc'),
+                sample_size=oos_metrics.get('N'),
+                r2_global=oos_metrics.get('R2_global'),
+                r2_fold_mean=oos_metrics.get('R2_fold_mean'),
+                r2_fold_weighted=oos_metrics.get('R2_fold_weighted'),
+                mae_ratio_global=oos_metrics.get('MAE_ratio_global'),
+                mae_ratio_fold_mean=oos_metrics.get('MAE_ratio_fold_mean'),
+                mae_ratio_fold_weighted=oos_metrics.get('MAE_ratio_fold_weighted')
+            )
+            
+            # Save model coefficients
+            enet_coefficients = model_results.get('enet_coefficients', {})
+            if enet_coefficients:
+                coefficient_objects = []
+                for feature_name, coeff_value in enet_coefficients.items():
+                    coefficient_objects.append(ModelCoefficient(
+                        analysis_run=analysis_run,
+                        feature_name=feature_name,
+                        coefficient_value=float(coeff_value)
+                    ))
+                if coefficient_objects:
+                    ModelCoefficient.objects.bulk_create(coefficient_objects, batch_size=1000)
+                    logger.info(f"Saved {len(coefficient_objects)} model coefficients")
+            
+            # Save final predictions
+            final_predictions = model_results.get('final_predictions', [])
+            if final_predictions:
+                prediction_objects = []
+                for pred_data in final_predictions:
+                    prediction_objects.append(StockPrediction(
+                        analysis_run=analysis_run,
+                        ticker=pred_data.get('ticker', ''),
+                        prediction_date=pd.to_datetime(pred_data.get('date')).date() if pred_data.get('date') else timezone.now().date(),
+                        final_prediction=float(pred_data.get('final_prediction', 0)),
+                        # Include all available features
+                        train_b=pred_data.get('train_b'),
+                        lag_train_b=pred_data.get('lag_train_b'),
+                        ar1_corr_10d=pred_data.get('ar1_corr_10d'),
+                        ar1_corr_20d=pred_data.get('ar1_corr_20d'),
+                        ar1_corr_60d=pred_data.get('ar1_corr_60d'),
+                        sign_persist_20d=pred_data.get('sign_persist_20d'),
+                        sign_persist_60d=pred_data.get('sign_persist_60d'),
+                        ret_1d=pred_data.get('ret_1d'),
+                        ret_5d=pred_data.get('ret_5d'),
+                        ret_20d=pred_data.get('ret_20d'),
+                        vol_63d=pred_data.get('vol_63d'),
+                        vol_126d=pred_data.get('vol_126d'),
+                        vol_252d=pred_data.get('vol_252d'),
+                        vol_756d=pred_data.get('vol_756d'),
+                        z_ma_20d=pred_data.get('Z_ma_20d'),
+                        cs_rank_ret_1d=pred_data.get('cs_rank_ret_1d'),
+                        cs_rank_ret_5d=pred_data.get('cs_rank_ret_5d'),
+                        cs_rank_ret_20d=pred_data.get('cs_rank_ret_20d'),
+                        cs_rank_z_ma_20d=pred_data.get('cs_rank_z_ma_20d'),
+                        cs_rank_vol_63d=pred_data.get('cs_rank_vol_63d'),
+                        cs_rank_vol_126d=pred_data.get('cs_rank_vol_126d'),
+                        cs_rank_vol_252d=pred_data.get('cs_rank_vol_252d'),
+                        cs_rank_vol_756d=pred_data.get('cs_rank_vol_756d'),
+                        xsec_disp_30d=pred_data.get('xsec_disp_30d')
+                    ))
+                
+                if prediction_objects:
+                    StockPrediction.objects.bulk_create(prediction_objects, batch_size=1000)
+                    logger.info(f"Saved {len(prediction_objects)} stock predictions")
+            
+            # Save per-stock performance metrics
+            per_stock_metrics = model_results.get('per_stock_metrics', [])
+            if per_stock_metrics:
+                performance_objects = []
+                for stock_metric in per_stock_metrics:
+                    performance_objects.append(StockPerformanceMetrics(
+                        analysis_run=analysis_run,
+                        ticker=stock_metric.get('Ticker', ''),
+                        r2_oos=stock_metric.get('R2_OOS'),
+                        rmse_oos=stock_metric.get('RMSE_OOS'),
+                        mae_oos=stock_metric.get('MAE_OOS'),
+                        mase_oos=stock_metric.get('MASE_OOS'),
+                        directional_accuracy_oos=stock_metric.get('DirAcc_OOS'),
+                        prediction_std_oos=stock_metric.get('PredStd_OOS'),
+                        n_observations_oos=stock_metric.get('N_OOS')
+                    ))
+                
+                if performance_objects:
+                    StockPerformanceMetrics.objects.bulk_create(performance_objects, batch_size=1000)
+                    logger.info(f"Saved {len(performance_objects)} per-stock performance metrics")
+            
+            logger.info(f"Successfully saved analysis run {analysis_run.id} to database")
+            return {
+                'success': True,
+                'analysis_run_id': analysis_run.id,
+                'run_name': run_name,
+                'model_results': model_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error saving results to database: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
     
-    def save_results(self, results, client_id=None):
-        """Save results in the format expected by the frontend"""
-        
-        # Create output directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if client_id:
-            output_dir = os.path.join(self.output_dir, f"client_{client_id}_{timestamp}")
-        else:
-            output_dir = os.path.join(self.output_dir, f"run_{timestamp}")
-        
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Save final predictions
-        predictions_file = os.path.join(output_dir, "final_predictions.csv")
-        if not results['final_predictions'].empty:
-            # Add coefficient columns to match expected format
-            for feature in self.feature_columns:
-                results['final_predictions'][f'coeff_{feature}'] = results['feature_importance'][feature]
-            
-            results['final_predictions'].to_csv(predictions_file, index=False)
-        
-        # Save global metrics
-        metrics_file = os.path.join(output_dir, "oos_metrics.csv")
-        perf = results['model_performance']
-        metrics_df = pd.DataFrame([{
-            'MAE': perf['test_mae'],
-            'RMSE': np.sqrt(perf['test_mae']**2),  # Approximation
-            'DirectionalAcc': perf['test_dir_acc'],
-            'N': perf['n_test'],
-            'R2_global': perf['test_r2'],
-            'R2_fold_mean': perf['test_r2'],
-            'R2_fold_weighted': perf['test_r2'],
-            'MAE_ratio_global': 1.0,
-            'MAE_ratio_fold_mean': 1.0,
-            'MAE_ratio_fold_weighted': 1.0
-        }])
-        metrics_df.to_csv(metrics_file, index=False)
-        
-        # Save per-stock metrics (simplified)
-        if not results['final_predictions'].empty:
-            stock_metrics_file = os.path.join(output_dir, "per_stock_oos_metrics.csv")
-            stock_metrics = []
-            for ticker in results['final_predictions']['ticker'].unique():
-                stock_metrics.append({
-                    'Ticker': ticker,
-                    'R2_OOS': perf['test_r2'],  # Same for all stocks in this simplified version
-                    'RMSE_OOS': np.sqrt(perf['test_mae']**2),
-                    'MAE_OOS': perf['test_mae'],
-                    'MASE_OOS': 1.0,
-                    'DirAcc_OOS': perf['test_dir_acc'],
-                    'PredStd_OOS': 0.02,
-                    'N_OOS': perf['n_test'] // len(results['final_predictions']['ticker'].unique())
-                })
-            
-            pd.DataFrame(stock_metrics).to_csv(stock_metrics_file, index=False)
-        
-        # Save model
-        model_file = os.path.join(output_dir, "universal_model.joblib")
-        joblib.dump({
-            'model': self.model,
-            'scaler': self.scaler,
-            'feature_columns': self.feature_columns,
-            'performance': perf
-        }, model_file)
-        
-        logger.info(f"Results saved to {output_dir}")
-        return output_dir
-    
-    def run_full_pipeline(self, csv_file_path, horizon_days=10, client_id=None, advanced_params=None):
-        """Run the complete pipeline from uploaded data to saved results"""
-        
+    def run_full_pipeline(self, csv_file_path, horizon_days=10, client_id=None, advanced_params=None, user=None):
+        """
+        Run the complete optimized pipeline from uploaded data to database storage
+        Uses the optimized model_no_csv.py for better performance and integration
+        """
         if advanced_params is None:
             advanced_params = {}
             
         try:
-            logger.info("Starting Universal Beta Model pipeline...")
+            logger.info("Starting Optimized Universal Beta Model pipeline...")
+            logger.info(f"File: {csv_file_path}, Horizon: {horizon_days}d")
             logger.info(f"Advanced parameters: {advanced_params}")
             
-            # Step 1: Process uploaded data with sector filtering
+            # Update model parameters from advanced_params
+            if 'alpha' in advanced_params:
+                self.fixed_params['enet_alpha'] = float(advanced_params['alpha'])
+            if 'l1_ratio' in advanced_params:
+                self.fixed_params['enet_l1_ratio'] = float(advanced_params['l1_ratio'])
+            if 'training_days' in advanced_params:
+                self.fixed_params['base_train_len_days'] = int(advanced_params['training_days'])
+            if 'testing_days' in advanced_params:
+                # Ensure testing days is at least 256 as requested
+                testing_days = max(256, int(advanced_params['testing_days']))
+                self.fixed_params['base_test_len_days'] = testing_days
+                logger.info(f"Updated testing days to {testing_days} (minimum 256)")
+            
+            # Step 1: Process uploaded data
             logger.info("Step 1: Processing uploaded data...")
-            processed_data = self.process_uploaded_data(
+            wide_returns = self.process_uploaded_data(
                 csv_file_path, 
                 sector_filter=advanced_params.get('sector_filter', 'all')
             )
             
-            # Step 2: Calculate features
-            logger.info("Step 2: Calculating features...")
-            feature_data = self.calculate_features(processed_data)
+            if wide_returns is None or wide_returns.empty:
+                raise ValueError("No valid data after processing uploaded file")
             
-            # Step 3: Train model and generate predictions
-            logger.info("Step 3: Training model and generating predictions...")
-            results = self.train_and_predict(
-                feature_data, 
-                horizon_days=horizon_days,
-                training_days=advanced_params.get('training_days', 252),
-                testing_days=advanced_params.get('testing_days', 63)
+            # Step 2: Create market features
+            logger.info("Step 2: Creating market features...")
+            market_features = self.create_market_features(wide_returns)
+            
+            # Step 3: Run optimized model pipeline
+            logger.info("Step 3: Running optimized model pipeline...")
+            model_results = self.run_model_pipeline(
+                wide_returns=wide_returns,
+                market_features=market_features,
+                horizon_days=horizon_days
             )
             
-            # Step 4: Handle multi-period predictions if requested
+            if 'error' in model_results:
+                raise RuntimeError(f"Model pipeline failed: {model_results['error']}")
+            
+            # Step 4: Save results directly to database
+            logger.info("Step 4: Saving results to database...")
+            run_name = f"Client_{client_id}_{horizon_days}d" if client_id else None
+            db_result = self.save_results_to_database(
+                model_results=model_results,
+                user=user,
+                run_name=run_name
+            )
+            
+            # Step 5: Handle multi-period analysis if requested
+            multi_period_results = {}
             if advanced_params.get('multi_period', False):
-                logger.info("Step 3b: Running multi-period predictions...")
-                multi_results = {}
+                logger.info("Step 5: Running multi-period analysis...")
                 for period in [1, 5, 10, 20]:
                     if period != horizon_days:  # Don't repeat the main horizon
-                        logger.info(f"Running {period}-day predictions...")
-                        period_results = self.train_and_predict(
-                            feature_data, 
-                            horizon_days=period,
-                            training_days=advanced_params.get('training_days', 252),
-                            testing_days=advanced_params.get('testing_days', 63)
-                        )
-                        multi_results[f'{period}d'] = period_results
-                
-                # Add multi-period results to main results
-                results['multi_period_results'] = multi_results
-                logger.info(f"Completed multi-period predictions for {len(multi_results)} additional horizons")
+                        try:
+                            logger.info(f"Running {period}-day analysis...")
+                            period_results = self.run_model_pipeline(
+                                wide_returns=wide_returns,
+                                market_features=market_features,
+                                horizon_days=period
+                            )
+                            
+                            if 'error' not in period_results:
+                                # Save to database
+                                period_run_name = f"Client_{client_id}_{period}d" if client_id else None
+                                period_db_result = self.save_results_to_database(
+                                    model_results=period_results,
+                                    user=user,
+                                    run_name=period_run_name
+                                )
+                                multi_period_results[f'{period}d'] = {
+                                    'model_results': period_results,
+                                    'db_result': period_db_result
+                                }
+                                logger.info(f"Completed {period}-day analysis")
+                            else:
+                                logger.warning(f"Failed {period}-day analysis: {period_results['error']}")
+                                
+                        except Exception as e:
+                            logger.error(f"Error in {period}-day analysis: {str(e)}")
+                            multi_period_results[f'{period}d'] = {'error': str(e)}
             
-            # Step 4: Save results
-            logger.info("Step 4: Saving results...")
-            output_dir = self.save_results(results, client_id)
+            # Prepare summary for frontend
+            summary = {
+                'success': True,
+                'horizon_days': horizon_days,
+                'total_stocks': len([col for col in wide_returns.columns if col != 'Date']),
+                'model_performance': model_results.get('oos_metrics', {}),
+                'feature_importance': model_results.get('enet_coefficients', {}),
+                'analysis_run_id': db_result.get('analysis_run_id'),
+                'run_name': db_result.get('run_name'),
+                'multi_period_count': len(multi_period_results)
+            }
             
-            logger.info("Pipeline completed successfully!")
+            if multi_period_results:
+                summary['multi_period_results'] = multi_period_results
             
+            logger.info("Universal Beta Model pipeline completed successfully!")
             return {
                 'success': True,
-                'output_directory': output_dir,
-                'summary': {
-                    'total_stocks': len(results['final_predictions']) if not results['final_predictions'].empty else 0,
-                    'horizon_days': horizon_days,
-                    'model_performance': results['model_performance'],
-                    'prediction_file': os.path.join(output_dir, "final_predictions.csv"),
-                    'metrics_file': os.path.join(output_dir, "oos_metrics.csv"),
-                    'advanced_params': advanced_params,
-                    'alpha': self.alpha,
-                    'l1_ratio': self.l1_ratio
-                }
+                'summary': summary,
+                'output_directory': self.output_dir,
+                'model_results': model_results,
+                'db_result': db_result
             }
             
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}")
+            logger.error(traceback.format_exc())
             return {
                 'success': False,
                 'error': str(e),
-                'output_directory': None
+                'summary': {
+                    'success': False,
+                    'error': str(e),
+                    'horizon_days': horizon_days,
+                    'total_stocks': 0,
+                    'model_performance': {}
+                }
             }

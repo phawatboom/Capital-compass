@@ -728,7 +728,13 @@ def download_csv(request, pk):
     except CSVUploadRecord.DoesNotExist:
         return Response({"error": "File not found"}, status=404)
 
-    return FileResponse(upload.filename.open("rb"), as_attachment=True, filename=os.path.basename(upload.filename.name))
+    # Check if file exists before trying to open it
+    try:
+        if not upload.filename:
+            return Response({"error": "File path not found"}, status=404)
+        return FileResponse(upload.filename.open("rb"), as_attachment=True, filename=os.path.basename(upload.filename.name))
+    except FileNotFoundError:
+        return Response({"error": "File not found on disk"}, status=404)
 
 
 @api_view(["GET"])
