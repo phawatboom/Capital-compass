@@ -54,12 +54,12 @@ export default function HomePage() {
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <Zap className="h-12 w-12 text-blue-600 mb-4" />
-                <CardTitle>Cross-Sectional Learning</CardTitle>
+                <CardTitle>Market-Wide Learning</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
                   Our Universal Model learns from patterns across the entire stock universe, not just individual stocks. 
-                  This cross-sectional approach provides more robust predictions by leveraging market-wide information.
+                  This approach provides stable and forward-looking beta forecasts.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -80,12 +80,12 @@ export default function HomePage() {
             <Card className="border-0 shadow-lg">
               <CardHeader>
                 <Shield className="h-12 w-12 text-purple-600 mb-4" />
-                <CardTitle>Automated Confidence</CardTitle>
+                <CardTitle>Performance Outcomes</CardTitle>
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Built-in confidence assessment and trading signal generation. Get high-confidence opportunities 
-                  automatically identified with directional predictions and risk metrics for informed decision-making.
+                  Our forecasts translate complex market signals into tangible performance insights.
+                  Identify which stocks are likely to outperform or lag, anticipate beta shifts before they happen.
                 </CardDescription>
               </CardContent>
             </Card>
