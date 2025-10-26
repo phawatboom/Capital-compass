@@ -510,9 +510,9 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                     <SelectValue placeholder="Select horizon" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="1">1 Day (Short-term)</SelectItem>
+                    <SelectItem value="1">1 Day (Daily)</SelectItem>
                     <SelectItem value="5">5 Days (Weekly)</SelectItem>
-                    <SelectItem value="10">10 Days (Bi-weekly)</SelectItem>
+                    <SelectItem value="10">10 Days (Fortnightly)</SelectItem>
                     <SelectItem value="20">20 Days (Monthly)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -545,10 +545,12 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                         <SelectValue placeholder="Select training period" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="126">6 Months (126 days)</SelectItem>
+
                         <SelectItem value="252">1 Year (252 days)</SelectItem>
                         <SelectItem value="504">2 Years (504 days)</SelectItem>
                         <SelectItem value="756">3 Years (756 days)</SelectItem>
+                          <SelectItem value="756">4 Years (1008 days)</SelectItem>
+                          <SelectItem value="126">5 Years (1260 days)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -566,7 +568,6 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                         <SelectItem value="252">1 Year (252 days)</SelectItem>
                         <SelectItem value="504">2 Years (504 days)</SelectItem>
                         <SelectItem value="756">3 Years (756 days)</SelectItem>
-                        <SelectItem value="1008">4 Years (1008 days)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -581,9 +582,10 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                         <SelectValue placeholder="Select alpha" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="0.001">0.001 (Weak regularization)</SelectItem>
+                        <SelectItem value="0.001">0.001 (Weak)</SelectItem>
                         <SelectItem value="0.01">0.01 (Standard)</SelectItem>
-                        <SelectItem value="0.1">0.1 (Strong regularization)</SelectItem>
+                        <SelectItem value="0.1">0.1 (Moderate)</SelectItem>
+                          <SelectItem value="0.5">0.1 (Strong)</SelectItem>
                         <SelectItem value="1.0">1.0 (Very strong)</SelectItem>
                       </SelectContent>
                     </Select>
