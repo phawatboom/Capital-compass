@@ -431,6 +431,15 @@ def train_final_model_bundle(learning_df: pd.DataFrame,
 def align_to_training_schema(X_new: pd.DataFrame, train_cols: List[str]) -> pd.DataFrame:
     return X_new.reindex(columns=train_cols, fill_value=0.0)
 
+def compute_feature_training_means(pooled_df: pd.DataFrame, train_cols: List[str]) -> Dict[str, float]:
+    """
+    Compute per-feature averages on the *training matrix* for this horizon.
+    Mirrors training NA handling (fillna(0.0)) and uses the same schema.
+    """
+    X = pooled_df[train_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    means = X.mean(numeric_only=True).astype(float).to_dict()
+    return means
+
 # --- OOS Evaluation ---
 
 def _calc_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
@@ -917,6 +926,10 @@ def train_final_model_and_return_dicts(
             dropna_rows=False
         )
         print("  ✓ Final model trained.")
+        # Per-feature averages on the exact training matrix/schema
+        train_cols = enet_bundle["train_cols"]
+        feature_training_means = compute_feature_training_means(pooled_df, train_cols)
+
     except Exception as e:
         print(f"  ❌ FINAL MODEL TRAINING FAILED: {e}")
         traceback.print_exc()
@@ -979,6 +992,7 @@ def train_final_model_and_return_dicts(
                 "oos_min_train_rows_fixed": min_rows,
                 "base_test_len_days": int(best_params['base_test_len_days'])
             },
+            "feature_training_means": feature_training_means,  # dict: feature -> average (raw, pre-scaling)
             "oos_metrics": oos_metrics,                  # dict
             "per_stock_metrics": per_stock,              # list[dict]
             "enet_coefficients": used_coeffs,            # dict: feature -> coef (non-zero only)
@@ -1109,8 +1123,7 @@ if __name__ == "__main__":
     print(f"{'!'*80}\n")
 
     # Horizons to run
-    #HORIZONS_IN_DAYS = [1, 5, 10, 20]
-    HORIZONS_IN_DAYS = [1]
+    HORIZONS_IN_DAYS = [1, 5, 10, 20]
 
     # --- 4. Parallelism ---
     total_cpus = os.cpu_count()
