@@ -447,25 +447,28 @@ def _calc_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
 
 def walk_forward_oos_eval(
     learning_df: pd.DataFrame,
+    model_kind: str = "enet",         
     enet_alpha: float = 0.003,
     enet_l1_ratio: float = 0.2,
     dropna_rows: bool = True,
-    min_train_rows: int = 5000,
+    min_train_rows: int = 80,
     val_rows: int = 20,
     embargo_rows: int = 0
 ) -> Tuple[pd.DataFrame, Dict[str, float], pd.DataFrame]:
     """
-    Expanding-window walk-forward CV. Returns (oos_predictions_df, metrics_dict, fold_stats_df).
+    Expanding-window walk-forward CV with optional purge/embargo.
+    Respects schema freeze per fold (ElasticNet) and OLS fitted features per fold.
+    Returns (oos_predictions_df, metrics_dict, fold_stats_df).
     """
     df = learning_df.sort_values("Date").reset_index(drop=True).copy()
     feats = get_feature_cols(df)
-
-    empty_preds = pd.DataFrame(columns=["Date","Ticker","actual_b","pred_b","fold","n_train"])
+    
+    # --- Empty placeholders ---
+    empty_preds = pd.DataFrame(columns=["Date","Ticker","actual_b","pred_b","fold", "n_train"])
     empty_metrics = {"MAE": np.nan, "RMSE": np.nan, "R2": np.nan, "DirectionalAcc": np.nan, "N": 0}
-    empty_fold_stats = pd.DataFrame(columns=["fold","n_pred","n_train","r2","end_date"])
-
+    empty_fold_stats = pd.DataFrame(columns=["fold", "n_pred", "n_train", "r2", "end_date"])
+    
     if len(df) < (min_train_rows + embargo_rows + max(1, val_rows)):
-        print(f"  OOS Eval skipped: Not enough rows. Have {len(df)}, need {min_train_rows + embargo_rows + max(1, val_rows)}")
         return empty_preds, empty_metrics, empty_fold_stats
 
     preds = []
@@ -476,64 +479,83 @@ def walk_forward_oos_eval(
     while True:
         val_start = train_end + 1 + max(0, embargo_rows)
         val_end   = val_start + val_rows - 1
-        if val_start >= N:
-            break
-        val_end = min(val_end, N - 1)
 
-        tr_df = df.iloc[:train_end+1].copy()
-        va_df = df.iloc[val_start:val_end+1].copy()
-        if va_df.empty:
-            break
+        if val_end >= N:
+            break  # no more complete validation blocks
 
-        tr = tr_df.dropna(subset=["test_b"] + feats) if dropna_rows else tr_df.dropna(subset=["test_b"])
+        tr = df.iloc[:train_end+1].copy()
+        va = df.iloc[val_start:val_end+1].copy()
+
+        tr = tr.dropna(subset=["test_b"] + feats) if dropna_rows else tr.dropna(subset=["test_b"])
         n_train_rows = len(tr)
-        if n_train_rows < min_train_rows:
-            train_end = val_end
-            fold += 1
-            continue
+        if tr.empty:
+            break
 
-        X_tr = tr[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).copy()
-        y_tr = tr["test_b"].astype(float).values
+        # === Train per fold ===
+        if model_kind.lower() == "enet":
+            X_tr = tr[feats].copy()
+            y_tr = tr["test_b"].astype(float).values
+            pipe = Pipeline([
+                ('scaler', StandardScaler(with_mean=True, with_std=True)),
+                ('model',  ElasticNet(alpha=enet_alpha, l1_ratio=enet_l1_ratio, max_iter=10000))
+            ])
+            pipe.fit(X_tr, y_tr)
+            train_cols = X_tr.columns.tolist()
 
-        if np.std(y_tr) < 1e-6:
-            train_end = val_end
-            fold += 1
-            continue
+            # Validate
+            if dropna_rows:
+                va = va.dropna(subset=["test_b"] + feats)
+            else:
+                va[feats] = va[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                va = va.dropna(subset=["test_b"])
+            if not va.empty:
+                X_va = align_to_training_schema(va[feats].copy(), train_cols)
+                y_hat = pipe.predict(X_va)
+                preds.append(pd.DataFrame({
+                    "Date": va["Date"].values,
+                    "Ticker": va["Ticker"].values,
+                    "actual_b": va["test_b"].values,
+                    "pred_b": y_hat,
+                    "fold": fold,
+                    "n_train": n_train_rows
+                }))
 
-        pipe = Pipeline([
-            ('scaler', StandardScaler(with_mean=True, with_std=True)),
-            ('model',  ElasticNet(alpha=enet_alpha, l1_ratio=enet_l1_ratio, max_iter=10000))
-        ])
-        pipe.fit(X_tr, y_tr)
-        train_cols = X_tr.columns.tolist()
+        else:  # OLS
+            X_tr = sm.add_constant(tr[feats].copy(), has_constant="add")
+            y_tr = tr["test_b"].astype(float).values
+            ols = sm.OLS(y_tr, X_tr).fit()
 
-        va = va_df.dropna(subset=["test_b"] + feats) if dropna_rows else va_df.dropna(subset=["test_b"])
-        if not va.empty:
-            X_va = va[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0).copy()
-            X_va = align_to_training_schema(X_va, train_cols)
-            y_hat = pipe.predict(X_va)
-            preds.append(pd.DataFrame({
-                "Date": va["Date"].values,
-                "Ticker": va["Ticker"].values,
-                "actual_b": va["test_b"].values,
-                "pred_b": y_hat,
-                "fold": fold,
-                "n_train": n_train_rows
-            }))
+            if dropna_rows:
+                va = va.dropna(subset=["test_b"] + feats)
+            else:
+                va[feats] = va[feats].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                va = va.dropna(subset=["test_b"])
+            if not va.empty:
+                X_va = sm.add_constant(va[feats], has_constant="add")
+                y_hat = ols.predict(X_va).values
+                preds.append(pd.DataFrame({
+                    "Date": va["Date"].values,
+                    "Ticker": va["Ticker"].values,
+                    "actual_b": va["test_b"].values,
+                    "pred_b": y_hat,
+                    "fold": fold,
+                    "n_train": n_train_rows
+                }))
 
+        # Expand window
         train_end = val_end
         fold += 1
-        if val_end == N - 1:
-            break
 
     if not preds:
         return empty_preds, empty_metrics, empty_fold_stats
 
-    oos = pd.concat(preds, ignore_index=True).sort_values("Date").reset_index(drop=True)
+    # === Combine and compute metrics ===
+    oos = pd.concat(preds, ignore_index=True)
+    oos = oos.sort_values("Date").reset_index(drop=True)
 
     m = _calc_metrics(oos["actual_b"].values, oos["pred_b"].values)
 
-    # Fold stats (computed; used for R²-over-time plot)
+    # --- Per-fold R²s ---
     fold_stats = []
     for f, df_f in oos.groupby("fold"):
         if len(df_f) >= 2:
@@ -554,36 +576,20 @@ def walk_forward_oos_eval(
     fold_stats_df = pd.DataFrame(fold_stats)
     if not fold_stats_df.empty:
         fold_stats_df["end_date"] = pd.to_datetime(fold_stats_df["end_date"])
+
+    if not fold_stats_df.empty:
         n_tot_weight = fold_stats_df["n_train"].sum()
         r2_fold_mean = float(fold_stats_df["r2"].mean())
-        r2_fold_weighted = float((fold_stats_df["r2"] * fold_stats_df["n_train"]).sum() / n_tot_weight) if n_tot_weight > 0 else np.nan
+        r2_fold_weighted = (
+            float((fold_stats_df["r2"] * fold_stats_df["n_train"]).sum() / n_tot_weight)
+            if n_tot_weight > 0 else np.nan
+        )
     else:
         r2_fold_mean = r2_fold_weighted = np.nan
 
-    m["R2_global"]        = m.pop("R2")
-    m["R2_fold_mean"]     = r2_fold_mean
+    m["R2_global"] = m.pop("R2")
+    m["R2_fold_mean"] = r2_fold_mean
     m["R2_fold_weighted"] = r2_fold_weighted
-
-    # Scale-free MAE ratios
-    def mae_ratio_global(y, yhat):
-        denom = np.abs(y - y.mean()).mean()
-        if denom == 0: return np.nan
-        return (np.abs(y - yhat).mean()) / denom
-
-    y_all = oos["actual_b"].values
-    yhat_all = oos["pred_b"].values
-    m["MAE_ratio_global"]  = float(mae_ratio_global(y_all, yhat_all))
-
-    mae_fold = []
-    for f, df_f in oos.groupby("fold"):
-        y, yhat = df_f["actual_b"].values, df_f["pred_b"].values
-        if len(y) >= 2:
-            mae_fold.append({"n": len(y), "ratio": mae_ratio_global(y, yhat)})
-
-    if mae_fold:
-        m["MAE_ratio_fold_mean"]     = float(np.nanmean([d["ratio"] for d in mae_fold]))
-        n_tot = sum(d["n"] for d in mae_fold)
-        m["MAE_ratio_fold_weighted"] = float(np.nansum([d["ratio"] * d["n"] for d in mae_fold]) / n_tot) if n_tot > 0 else np.nan
 
     return oos, m, fold_stats_df
 
