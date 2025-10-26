@@ -15,7 +15,7 @@ from .b_forecast_pipeline_extended import (
     train_final_model_and_save,
 )
 
-def run_analysis_from_web(upload_pk: int, model_for_pred: str = "enet"):
+def run_analysis_from_web(upload_pk: int, model_for_pred: str = "enet", config: dict | None = None):
     """
     Web entrypoint for running the pooled ElasticNet pipeline on an uploaded Excel file.
     Includes:
@@ -41,8 +41,23 @@ def run_analysis_from_web(upload_pk: int, model_for_pred: str = "enet"):
         print(f"📊 Found {len(tickers)} tickers (showing first 10): {tickers[:10]}")
 
         # ----------------------------------------------------------------------
-        # STEP 2. Define fixed parameters
+        # STEP 2. Define and override parameters from config
         # ----------------------------------------------------------------------
+        print("📈 Calculating market-wide features...")
+        market_features = pd.DataFrame(index=raw_df["Date"])
+        market_features.index.name = "Date"
+
+        # Cross-sectional dispersion of returns each day
+        xsec_disp_1d = raw_df[tickers].std(axis=1)
+        xsec_disp_30d = xsec_disp_1d.rolling(30, min_periods=10).mean()
+
+        market_features["xsec_disp_1d"] = xsec_disp_1d.values
+        market_features["xsec_disp_30d"] = xsec_disp_30d.values
+
+        # Forward-fill to align with any period returns later on
+        market_features = market_features.sort_index().ffill().reset_index()
+        print(f"✅ Market features calculated → {len(market_features)} rows")
+
         fixed_params = {
             "enet_alpha": 0.003,
             "enet_l1_ratio": 0.2,
@@ -51,60 +66,91 @@ def run_analysis_from_web(upload_pk: int, model_for_pred: str = "enet"):
             "oos_min_train_rows_fixed": 5000  # required for walk-forward CV
         }
 
-        print("⚙️  Using model parameters:")
+        # Default values
+        horizon_days = 5
+        multi_period = False
+
+        if config:
+            try:
+                fixed_params["enet_alpha"] = float(config.get("alpha", fixed_params["enet_alpha"]))
+                fixed_params["enet_l1_ratio"] = float(config.get("l1_ratio", fixed_params["enet_l1_ratio"]))
+                fixed_params["base_train_len_days"] = int(config.get("training_days", fixed_params["base_train_len_days"]))
+                fixed_params["base_test_len_days"] = int(config.get("testing_days", fixed_params["base_test_len_days"]))
+                horizon_days = int(config.get("horizon_days", horizon_days))
+                multi_period = bool(config.get("multi_period", False))
+            except Exception as e:
+                print(f"⚠️ Could not parse model config values: {e}")
+
+        print("⚙️ Using model parameters:")
         for k, v in fixed_params.items():
             print(f"   • {k}: {v}")
+        print(f"   • horizon_days: {horizon_days}")
+        print(f"   • multi_period: {multi_period}")
 
         # ----------------------------------------------------------------------
-        # STEP 3. Build pooled learning table (feature generation)
+        # STEP 3. Determine horizons to run
         # ----------------------------------------------------------------------
-        print("🏗️  Generating feature table (train_b, lag_train_b, ar1_corr_*, etc.)...")
-        t0 = time.time()
-        learning_df = run_parallel_data_prep(
-            mxus_returns=raw_df,
-            market_features=pd.DataFrame(),
-            tickers=tickers,
-            horizon=5,
-            base_train_len=fixed_params["base_train_len_days"],
-            base_test_len=fixed_params["base_test_len_days"],
-            max_workers=os.cpu_count() - 2
-        )
-        t1 = time.time()
+        horizons_to_run = [1, 5, 10, 20] if multi_period else [horizon_days]
+        shared_stats_ids = []
+        tickers_total = 0
 
-        if learning_df is None or learning_df.empty:
-            raise RuntimeError("Learning table generation failed: no valid feature data.")
-
-        print(f"✅ Feature table built in {t1 - t0:.1f}s → {learning_df.shape[0]} rows × {learning_df.shape[1]} cols")
+        overall_start = time.time()
 
         # ----------------------------------------------------------------------
-        # STEP 4. Train model & save to DB
+        # STEP 4. Run analysis for each horizon
         # ----------------------------------------------------------------------
-        print("🏋️‍♂️ Training pooled ElasticNet model and saving to database...")
-        t2 = time.time()
-        result = train_final_model_and_save(
-            pooled_df=learning_df,
-            best_params=pd.Series(fixed_params),
-            horizon=5
-        )
-        t3 = time.time()
+        for horizon in horizons_to_run:
+            print(f"\n🏗️ Building features for horizon={horizon}d...")
+            t0 = time.time()
 
-        if not result.get("ok"):
-            raise RuntimeError(result.get("error", "Unknown model error."))
+            learning_df = run_parallel_data_prep(
+                mxus_returns=raw_df,
+                market_features=market_features,
+                tickers=tickers,
+                horizon=horizon,
+                base_train_len=fixed_params["base_train_len_days"],
+                base_test_len=fixed_params["base_test_len_days"],
+                max_workers=max(os.cpu_count() - 2, 1),
+            )
 
-        print(f"🎉 Model training complete in {t3 - t2:.1f}s")
-        print(f"🧠 SharedStats ID: {result.get('shared_stats_id')}")
-        print(f"📈 Stocks processed: {result.get('tickers_saved')}")
+            if learning_df is None or learning_df.empty:
+                print(f"❌ No feature data produced for horizon {horizon}d. Skipping.")
+                continue
 
-        total_time = time.time() - t0
-        print(f"⏱️  Total pipeline runtime: {total_time:.1f}s")
+            print(f"✅ Feature table built in {time.time() - t0:.1f}s → {learning_df.shape[0]} rows × {learning_df.shape[1]} cols")
+
+            # Train & save
+            print(f"🏋️‍♂️ Training ElasticNet model for horizon={horizon}d...")
+            t2 = time.time()
+
+            result = train_final_model_and_save(
+                pooled_df=learning_df,
+                best_params=pd.Series(fixed_params),
+                horizon=horizon
+            )
+
+            if not result.get("ok"):
+                print(f"⚠️ Model training failed for horizon={horizon}d: {result.get('error')}")
+                continue
+
+            shared_stats_ids.append(result.get("shared_stats_id"))
+            tickers_total += result.get("tickers_saved", 0)
+            print(f"🎉 Horizon={horizon}d complete in {time.time() - t2:.1f}s → SharedStats ID={result.get('shared_stats_id')}")
+
+        total_time = time.time() - overall_start
+        print(f"\n✅ All horizon(s) complete in {total_time:.1f}s")
+        print(f"🧠 Total SharedStats created: {len(shared_stats_ids)}")
+        print(f"📈 Total tickers processed: {tickers_total}")
         print("=" * 90)
 
         return {
             "ok": True,
             "timestamp": timezone.now(),
-            "shared_stats_id": result.get("shared_stats_id"),
-            "tickers_saved": result.get("tickers_saved"),
+            "shared_stats_ids": shared_stats_ids,
+            "tickers_saved_total": tickers_total,
             "params": fixed_params,
+            "multi_period": multi_period,
+            "horizons_run": horizons_to_run
         }
 
     except Exception as e:

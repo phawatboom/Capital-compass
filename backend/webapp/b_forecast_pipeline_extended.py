@@ -1110,6 +1110,7 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
         model_used="enet",
         r2_global=metrics.get("R2_global"),
         volatility_coeff=intercept,
+        horizon_days=horizon,
         **{f"coef_{k}": v for k, v in coeffs.items() if hasattr(FactorSharedStats, f"coef_{k}")},
         **{f"avg_{k}": pooled_df[k].mean() if k in pooled_df.columns else None
            for k in [c for c in enet_bundle['train_cols'] if hasattr(FactorSharedStats, f"avg_{c}")]},
@@ -1136,6 +1137,7 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
                     created_at=row["Date"],
                     ticker=ticker,
                     shared_stats=shared,
+                    horizon_days=horizon,
                     b_coefficient=float(preds[j]),
                     y_intercept=intercept,
                     volatility=row.get("vol_63d") or row.get("vol_126d"),
@@ -1146,6 +1148,7 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
                         "sign_persist_20d", "sign_persist_60d", "ret_1d", "ret_5d", "ret_20d",
                         "vol_63d", "vol_126d", "vol_252d", "vol_756d", "Z_ma_20d",
                         "cs_rank_ret_1d", "cs_rank_ret_5d", "cs_rank_ret_20d", "cs_rank_z_ma_20d",
+                        "cs_rank_vol_63d", "cs_rank_vol_126d", "cs_rank_vol_252d", "cs_rank_vol_756d",
                     ]}
                 ))
         except IndexError as e:
