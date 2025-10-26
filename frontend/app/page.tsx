@@ -11,10 +11,10 @@ export default function HomePage() {
         <div className="container mx-auto text-center max-w-4xl">
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
             Beta Forecasting with
-            <span className="text-blue-500"> ARIMA Model</span>
+            <span className="text-blue-500"> Model</span>
           </h1>
           <p className="text-lg text-gray-600 mb-2 leading-relaxed">
-            Our model captures how each stock’s short-term behavior shifts relative to its peers and market volatility, using advanced ElasticNet regression to forecast next-period β values across multiple horizons -s revealing the real-time balance between mean reversion and momentum.
+            Our model captures how each stock’s short-term behavior shifts relative to its peers and market volatility, using advanced ElasticNet regression to forecast next-period β values across multiple horizons, revealing the real-time balance between mean reversion and momentum.
           </p>
           <div className="grid md:grid-cols-3 gap-4 mb-8 text-center">
             {/* <div className="bg-white p-4 rounded-lg shadow-sm">
