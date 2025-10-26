@@ -98,8 +98,8 @@ def load_mxus_returns(xlsx_path: str, sheet: str = "Returns") -> pd.DataFrame:
 
     return _coerce_date(df, "Date")
 
-# Add the Data Analysis directory to Python path for model access
-sys.path.append(os.path.join(settings.BASE_DIR.parent, "Data Analysis"))
+# Add the data-analysis directory to Python path for model access
+sys.path.append(os.path.join(settings.BASE_DIR.parent, "data-analysis"))
 
 # Try to import optimized model functions
 try:
@@ -166,19 +166,35 @@ class IntegratedUniversalBetaModel:
                         df = pd.read_csv(csv_file_path, encoding='latin-1')
                     except UnicodeDecodeError:
                         df = pd.read_csv(csv_file_path, encoding='cp1252')
-            
+
             elif file_extension in ['xlsx', 'xls']:
                 # Excel file processing with robust MXUS-style loading
                 try:
-                    # First try standard Excel read
-                    df = pd.read_excel(csv_file_path)
-                    logger.info(f"Standard Excel read successful")
+                    # Always prefer MXUS-style loader first for 'Returns' sheet
+                    df = load_mxus_returns(csv_file_path, sheet="Returns")
+                    logger.info("MXUS-style Returns loader used successfully")
                 except Exception as e:
-                    logger.info(f"Standard Excel read failed, trying MXUS-style loading: {e}")
+                    logger.info(f"MXUS loader failed ({e}), trying standard Excel read")
                     try:
-                        # Try MXUS-style loading for 'Returns' sheet
-                        df = load_mxus_returns(csv_file_path, sheet="Returns")
-                        logger.info(f"MXUS-style loading successful")
+                        df = pd.read_excel(csv_file_path)
+                        logger.info("Standard Excel read successful")
+                    except Exception as e2:
+                        logger.info(f"Standard Excel read failed ({e2}), trying first sheet fallback")
+                        raw = pd.read_excel(csv_file_path, header=None, dtype=object)
+                        header_row = None
+                        for i in range(min(10, len(raw))):
+                            row = raw.iloc[i].astype(str).str.strip()
+                            if any(word in row.str.lower().values for word in ['date', 'time', 'period']):
+                                header_row = i
+                                break
+                        if header_row is None:
+                            raise ValueError("Could not find valid header row in Excel file")
+                        cols = raw.iloc[header_row].astype(str).str.strip().tolist()
+                        df = raw.iloc[header_row + 1:].copy()
+                        df.columns = cols
+                        for c in df.columns:
+                            if c.lower() != 'date':
+                                df[c] = df[c].map(_clean_numeric)
                     except Exception as e2:
                         logger.info(f"MXUS Returns sheet failed, trying first sheet: {e2}")
                         # Fallback: try first sheet with robust header detection

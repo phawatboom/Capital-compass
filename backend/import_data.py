@@ -18,8 +18,8 @@ def main():
     
     # Initialize the importer with the correct path
     data_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), 
-        "Data Analysis", 
+        os.path.dirname(os.path.dirname(__file__)),
+        "data-analysis",
         "Pooled_Outputs_v6_Fixed"
     )
     

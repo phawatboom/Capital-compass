@@ -116,14 +116,14 @@ class RunAnalysisView(APIView):
         project_root = Path(settings.BASE_DIR).parent
 
         # ✅ NEW MODEL FILE (Active)
-        script_path = project_root / 'Data Analysis' / 'b_forecast_pipeline_extended.py'
+        script_path = project_root / 'data-analysis' / 'b_forecast_pipeline_extended.py'
 
 
         # --- LEGACY MODEL FILES (Preserved for rollback) ---
         # candidates = [
-        #     'Data Analysis/main_model_file_merged_bcoef_strategy1_stats_legacy (1).py',
-        #     'Data Analysis/main_model_file_stable_2_extended_future_prediciton_bhat.py',
-        #     'Data Analysis/main_model_file_stable_2_extended_future_prediciton.py'
+        #     'data-analysis/main_model_file_merged_bcoef_strategy1_stats_legacy (1).py',
+        #     'data-analysis/main_model_file_stable_2_extended_future_prediciton_bhat.py',
+        #     'data-analysis/main_model_file_stable_2_extended_future_prediciton.py'
         # ]
         # for candidate in candidates:
         #     potential = project_root / candidate
@@ -1332,7 +1332,7 @@ def analyze_csv(request, pk):
 
     # --- Path setup ---
     project_root = Path(settings.BASE_DIR).parent
-    analysis_dir = project_root / "Data Analysis"
+    analysis_dir = project_root / "data-analysis"
 
     # ✅ NEW MODEL (Active)
     script_path = analysis_dir / 'b_forecast_pipeline_extended.py'
@@ -1503,7 +1503,7 @@ def analyze_csv(request, pk):
 #     def _run_mean_reversion_analysis(self, analysis, upload, tickers=None):
 #         """Execute Mean-Reversion model"""
 #         project_root = Path(settings.BASE_DIR).parent
-#         script_path = project_root / 'Data Analysis' / 'main_model_file_stable_2_extended_future_prediciton.py'
+#         script_path = project_root / 'data-analysis' / 'main_model_file_stable_2_extended_future_prediciton.py'
 #
 #         if not script_path.exists():
 #             raise FileNotFoundError(f"Mean-Reversion script not found: {script_path}")
@@ -1527,7 +1527,7 @@ def analyze_csv(request, pk):
 #     def _run_beta_forecasting_analysis(self, analysis, upload, tickers=None):
 #         """Execute Beta-Forecasting model"""
 #         project_root = Path(settings.BASE_DIR).parent
-#         script_path = project_root / 'Data Analysis' / 'bcoef_forecast_v_4_no_market.py'
+#         script_path = project_root / 'data-analysis' / 'bcoef_forecast_v_4_no_market.py'
 #
 #         if not script_path.exists():
 #             raise FileNotFoundError(f"Beta-Forecasting script not found: {script_path}")

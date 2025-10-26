@@ -40,20 +40,20 @@ backend/backend/db-media/
 .DS_Store
 Thumbs.db
 
-# Data Analysis results and outputs (IMPORTANT: Exclude large files)
-Data Analysis/results/
-Data Analysis/outputs/
-Data Analysis/test_results/
-Data Analysis/charts/
-Data Analysis/logs/
-Data Analysis/Pooled_Outputs*/
-Data Analysis/iterations/
-Data Analysis/stable_versions/
+# data-analysis results and outputs (IMPORTANT: Exclude large files)
+data-analysis/results/
+data-analysis/outputs/
+data-analysis/test_results/
+data-analysis/charts/
+data-analysis/logs/
+data-analysis/Pooled_Outputs*/
+data-analysis/iterations/
+data-analysis/stable_versions/
 "Data Analysis/"
 **/"Data Analysis/"
 
 # Data files and CSV outputs
-Data Analysis/MXUS_Data.xlsx
+data-analysis/MXUS_Data.xlsx
 Data Analysis/*.xlsx
 Data Analysis/*.csv
 Data Analysis/Data/*.csv
