@@ -1,18 +1,42 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Upload, Play, CheckCircle, AlertCircle, RefreshCw, BarChart3, Clipboard } from "lucide-react";
+import {
+  Upload as UploadIcon,
+  Play,
+  CheckCircle,
+  AlertCircle,
+  RefreshCw,
+  BarChart3,
+  Clipboard,
+  FileSpreadsheet,
+  FolderOpen,
+  Info as InfoIcon,
+} from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import api from "@/app/lib/api";
 
+// ===== types =====
 interface ClientStatus {
   status: string;
   stage?: string;
@@ -26,12 +50,178 @@ interface ClientStatus {
 }
 
 interface IntegratedWorkflowProps {
-  onResultsReady?: (clientId: string) => void;
-  fileId?: number; // Optional file ID for pre-uploaded files
+  onResultsReady?: (clientIdOrFileId: string) => void;
+  fileId?: number; // Optional file ID for pre-uploaded files (from My Data)
 }
 
+// ===== helpers =====
+function basename(p: string): string {
+  const parts = (p ?? "").split(/[\\/]/);
+  return parts[parts.length - 1] || p || "";
+}
+function extLower(p: string): string {
+  const b = basename(p);
+  const i = b.lastIndexOf(".");
+  return i >= 0 ? b.slice(i + 1).toLowerCase() : "";
+}
+const fmtBytes = (n?: number) => {
+  if (!n && n !== 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+};
+const fmtDate = (d?: string) => (d ? new Date(d).toLocaleString() : "");
+const copy = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    /* no-op */
+  }
+};
+
+// ===== inline modal for picking an existing Excel upload =====
+type PickerUpload = { id: number; filename: string; uploaded_at: string };
+
+function FilePickerModal({
+  open,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (id: number) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<PickerUpload[]>([]);
+  const [query, setQuery] = useState("");
+
+  const load = useCallback(async () => {
+    if (!open) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await api.get("/csv-uploads/");
+      const excelOnly = (data as PickerUpload[]).filter((u) => {
+        const e = extLower(u.filename);
+        return e === "xlsx" || e === "xls";
+      });
+      setItems(excelOnly ?? []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load uploads");
+    } finally {
+      setLoading(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter(
+      (u) => !q || basename(u.filename).toLowerCase().includes(q),
+    );
+  }, [items, query]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="bg-white w-full max-w-3xl rounded-lg shadow-lg">
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <h3 className="text-base font-semibold">Choose an uploaded Excel file</h3>
+          <button onClick={onClose} className="p-2 rounded hover:bg-gray-100" aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <div className="flex gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by file name…"
+              className="border rounded px-3 py-2 w-full"
+              aria-label="Search uploaded files"
+            />
+          </div>
+
+          {error && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2" role="alert">
+              {error}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-sm text-gray-500">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-sm text-gray-500">No Excel uploads found.</div>
+          ) : (
+            <div className="max-h-[380px] overflow-auto border rounded">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Name</th>
+                    <th className="px-3 py-2 text-left">Type</th>
+                    <th className="px-3 py-2 text-left">Uploaded</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((u) => {
+                    const e = extLower(u.filename);
+                    return (
+                      <tr key={u.id} className="border-t">
+                        <td className="px-3 py-2 align-top">{basename(u.filename)}</td>
+                        <td className="px-3 py-2 align-top">
+                          <span className="inline-block text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                            {e.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          {new Date(u.uploaded_at).toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right">
+                          <button
+                            onClick={() => onPick(u.id)}
+                            className="px-3 py-1.5 border rounded text-sm hover:bg-gray-50"
+                          >
+                            Use file
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="px-4 py-3 border-t text-right">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 border rounded text-sm hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== main component =====
 export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflowProps) {
   const router = useRouter();
+
   const [uploadState, setUploadState] = useState<
     "idle" | "uploading" | "uploaded" | "processing" | "completed" | "error"
   >("idle");
@@ -40,20 +230,25 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   const [horizonDays, setHorizonDays] = useState<string>("10");
   const [preUploadedFileInfo, setPreUploadedFileInfo] = useState<any>(null);
 
-  // Enhanced model configuration for fund managers
+  // Which uploaded file is currently selected for analysis (from prop or picker)
+  const [activeFileId, setActiveFileId] = useState<number | null>(fileId ?? null);
+
+  // Modal open/close
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Enhanced model configuration
   const [modelConfig, setModelConfig] = useState({
-    riskTolerance: "medium", // low, medium, high
-    sectorFilter: "all", // all, technology, financials, healthcare, etc.
-    minimumConfidence: "0.6", // 0.5-0.9
-    lookbackPeriod: "60", // 30, 60, 90, 120 days
-    volatilityAdjustment: "true", // true/false
-    crossSectionalRanking: "true", // true/false
-    // Advanced model parameters
-    trainingDays: "252", // 1 year default
-    testingDays: "252", // 1 year default
-    alpha: "0.01", // L1/L2 regularization strength
-    l1Ratio: "0.5", // ElasticNet mixing parameter (0=Ridge, 1=Lasso)
-    multiPeriod: "false", // Run predictions for all periods (1d, 5d, 10d, 20d)
+    riskTolerance: "medium",
+    sectorFilter: "all",
+    minimumConfidence: "0.6",
+    lookbackPeriod: "60",
+    volatilityAdjustment: "true",
+    crossSectionalRanking: "true",
+    trainingDays: "252",
+    testingDays: "252",
+    alpha: "0.01",
+    l1Ratio: "0.5",
+    multiPeriod: "false",
   });
 
   const [clientStatus, setClientStatus] = useState<ClientStatus | null>(null);
@@ -61,39 +256,22 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [statusInterval, setStatusInterval] = useState<NodeJS.Timeout | null>(null);
 
-  // ========= helpers =========
-  const fmtBytes = (n?: number) => {
-    if (!n && n !== 0) return "";
-    const units = ["B", "KB", "MB", "GB"]; let i = 0; let v = n;
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-    return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
-  };
-  const fmtDate = (d?: string) => (d ? new Date(d).toLocaleString() : "");
-  const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); }
-    catch { /* no-op */ }
-  };
-
-  // Handle pre-uploaded file
+  // If prop fileId changes, adopt it
   useEffect(() => {
-    if (fileId) {
-      loadPreUploadedFile();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (fileId) setActiveFileId(fileId);
   }, [fileId]);
 
-  const loadPreUploadedFile = async () => {
-    if (!fileId) return;
+  // Load meta for any chosen uploaded file id (prop-driven or picker-driven)
+  const loadPreUploadedFile = async (id: number) => {
     try {
       setUploadState("uploading");
       setError("");
 
-      const metaResponse = await api.get(`/csv-uploads/${fileId}/meta/`);
+      const metaResponse = await api.get(`/csv-uploads/${id}/meta/`);
       const fileInfo = metaResponse.data;
       setPreUploadedFileInfo(fileInfo);
 
-      // Stable client tag used only for the integrated status flow (not stored in DB)
-      const newClientId = `csv_upload_${fileId}`;
+      const newClientId = `csv_upload_${id}`;
       setClientId(newClientId);
 
       // Mark as ready to analyze
@@ -105,30 +283,40 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     }
   };
 
-  // File upload state (ad-hoc upload path using the integrated workflow)
+  useEffect(() => {
+    if (activeFileId) {
+      void loadPreUploadedFile(activeFileId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFileId]);
+
+  // ===== Dropzone: Excel-only; controlled click/keyboard via open() =====
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0];
-      if (file && file.name) {
-        const fileName = file.name.toLowerCase();
-        if (fileName.endsWith(".csv") || fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-          setSelectedFile(file);
-          setError("");
-        } else {
-          setError("Please upload a CSV or Excel file (.csv, .xlsx, .xls)");
-        }
+      const name = (file?.name || "").toLowerCase();
+      if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+        setSelectedFile(file);
+        setError("");
+        // ensure we are not locked to a previously chosen uploaded file
+        setActiveFileId(null);
+        setPreUploadedFileInfo(null);
+        setClientStatus(null);
+      } else {
+        setError("Please upload an Excel file (.xlsx or .xls)");
       }
     }
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     accept: {
-      "text/csv": [".csv"],
       "application/vnd.ms-excel": [".xls"],
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
     },
     multiple: false,
+    noClick: true,      // we’ll drive clicks explicitly via open()
+    noKeyboard: true,   // and keyboard, to keep behavior consistent
   });
 
   const uploadFile = async () => {
@@ -145,6 +333,12 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     try {
       const response = await api.post("/integrated/upload/", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (e) => {
+          if (e.total) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress(pct);
+          }
+        },
       });
 
       const result = response.data;
@@ -170,8 +364,11 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   const runModel = async () => {
     setError("");
 
-    // === Path A: Pre-uploaded file -> call synchronous endpoint /csv-uploads/<pk>/analyze/ ===
-    if (fileId) {
+    // Prefer a chosen uploaded Excel file if present
+    const chosenId = activeFileId ?? null;
+
+    // === Path A: Pre-uploaded file -> synchronous endpoint /csv-uploads/<pk>/analyze/
+    if (chosenId) {
       try {
         setUploadState("processing");
         const payload = {
@@ -183,10 +380,10 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
           multi_period: modelConfig.multiPeriod === "true",
         };
 
-        const { data } = await api.post(`/csv-uploads/${fileId}/analyze/`, payload);
+        const { data } = await api.post(`/csv-uploads/${chosenId}/analyze/`, payload);
         if (data?.ok || data?.success) {
           setUploadState("completed");
-          if (onResultsReady) onResultsReady(String(fileId));
+          if (onResultsReady) onResultsReady(String(chosenId));
           else navigateToDashboard();
         } else {
           setUploadState("error");
@@ -199,7 +396,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       return; // Important: do not fall through to the integrated path
     }
 
-    // === Path B: Ad-hoc upload -> existing integrated flow with polling ===
+    // === Path B: Ad-hoc upload -> existing integrated flow with polling
     if (!clientId) return;
 
     setUploadState("processing");
@@ -249,7 +446,10 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       if (result.status === "success") {
         setClientStatus(result.data);
 
-        if (result.data.status === "completed" || result.data.status === "completed_with_warnings") {
+        if (
+          result.data.status === "completed" ||
+          result.data.status === "completed_with_warnings"
+        ) {
           setUploadState("completed");
           if (statusInterval) {
             clearInterval(statusInterval);
@@ -258,7 +458,9 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
           if (onResultsReady) {
             onResultsReady(clientId);
           } else {
-            setTimeout(() => { navigateToDashboard(); }, 1200);
+            setTimeout(() => {
+              navigateToDashboard();
+            }, 1200);
           }
         } else if (result.data.status === "failed") {
           setUploadState("error");
@@ -277,10 +479,10 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
   const resetWorkflow = () => {
     if (fileId) {
-      // If coming from a pre-uploaded file, navigate back to My Data
+      // If the page was opened for a pre-uploaded file, navigate back to My Data
       window.location.href = "/uploads";
     } else {
-      // Regular reset for normal workflow
+      // Regular reset for normal workflow (including when a file was chosen via picker)
       setUploadState("idle");
       setClientId("");
       setSelectedFile(null);
@@ -288,6 +490,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       setError("");
       setUploadProgress(0);
       setPreUploadedFileInfo(null);
+      setActiveFileId(null);
       if (statusInterval) {
         clearInterval(statusInterval);
         setStatusInterval(null);
@@ -296,7 +499,6 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   };
 
   const navigateToDashboard = () => {
-    // Navigate to My Data page with analysis tab active
     router.push("/beta");
   };
 
@@ -311,7 +513,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       case "error":
         return <AlertCircle className="h-5 w-5 text-red-600" />;
       default:
-        return <Upload className="h-5 w-5 text-gray-600" />;
+        return <UploadIcon className="h-5 w-5 text-gray-600" />;
     }
   };
 
@@ -342,19 +544,24 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     );
   };
 
-  // Renders a clear, user-meaningful "data source" box instead of a raw Client ID field
+  // Renders a clear, user-meaningful "data source" box
   const DataSourceBox = () => {
-    const isPreUploaded = Boolean(fileId);
+    const isPreUploaded = Boolean(activeFileId);
     return (
       <div className="rounded-lg border p-3 bg-gray-50">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-wide text-gray-500">Data source</div>
+            <div className="text-xs uppercase tracking-wide text-gray-500">
+              Data source
+            </div>
             {isPreUploaded ? (
               <div className="mt-1 text-sm text-gray-800">
-                <div className="font-medium">{preUploadedFileInfo?.filename ?? "Selected upload"}</div>
+                <div className="font-medium">
+                  {preUploadedFileInfo?.filename ?? "Selected upload"}
+                </div>
                 <div className="text-gray-600">
-                  Upload ID: <span className="font-mono">#{fileId}</span>
+                  Upload ID:{" "}
+                  <span className="font-mono">#{activeFileId}</span>
                   {preUploadedFileInfo?.uploaded_at && (
                     <> • Uploaded {fmtDate(preUploadedFileInfo.uploaded_at)}</>
                   )}
@@ -364,26 +571,35 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                 </div>
                 {clientStatus?.n_rows && (
                   <div className="text-gray-600">
-                    Parsed shape: {clientStatus.n_rows?.toLocaleString()} rows × {clientStatus.n_cols} columns
+                    Parsed shape: {clientStatus.n_rows?.toLocaleString()} rows ×{" "}
+                    {clientStatus.n_cols} columns
                   </div>
                 )}
                 <div className="mt-1 text-xs text-gray-500">
-                  This run will analyze the selected upload directly. No duplicate upload is created.
+                  This run will analyze the selected upload directly. No
+                  duplicate upload is created.
                 </div>
               </div>
             ) : (
               <div className="mt-1 text-sm text-gray-800">
-                <div className="font-medium">{clientStatus?.filename ?? selectedFile?.name ?? "Uploaded file"}</div>
+                <div className="font-medium">
+                  {clientStatus?.filename ?? selectedFile?.name ?? "Uploaded file"}
+                </div>
                 <div className="text-gray-600">
                   {clientStatus?.n_rows || clientStatus?.n_cols ? (
-                    <>Parsed shape: {clientStatus?.n_rows?.toLocaleString() ?? "?"} rows × {clientStatus?.n_cols ?? "?"} columns</>
+                    <>
+                      Parsed shape:{" "}
+                      {clientStatus?.n_rows?.toLocaleString() ?? "?"} rows ×{" "}
+                      {clientStatus?.n_cols ?? "?"} columns
+                    </>
                   ) : (
                     <>Awaiting upload…</>
                   )}
                 </div>
                 <div className="mt-2 text-xs text-gray-500">
-                  A temporary processing session is used under the hood. You usually do not need the session tag, but it can
-                  help support debug issues.
+                  A temporary processing session is used under the hood. You
+                  usually do not need the session tag, but it can help support
+                  debug issues.
                 </div>
               </div>
             )}
@@ -392,13 +608,150 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
           {/* Technical details (copy session tag) */}
           <div className="shrink-0 flex flex-col items-end gap-2">
             {!isPreUploaded && clientId && (
-              <Button variant="outline" size="sm" onClick={() => copy(clientId)} className="h-8">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => copy(clientId)}
+                className="h-8"
+              >
                 <Clipboard className="h-3.5 w-3.5 mr-2" /> Copy session tag
               </Button>
             )}
             {isPreUploaded && clientId && (
-              <div className="text-[11px] text-gray-500 font-mono">session: {clientId}</div>
+              <div className="text-[11px] text-gray-500 font-mono">
+                session: {clientId}
+              </div>
             )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ===== Ingestion UI blocks (tiles) =====
+  const SourceTiles = () => {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Choose from My Data (featured) */}
+        <div
+          className="rounded-2xl border shadow-sm hover:shadow-md transition-shadow ring-1 ring-gray-200 hover:ring-blue-300 bg-white"
+          role="group"
+          aria-label="Choose from My Data"
+        >
+          <div className="p-5 flex items-start gap-4">
+            <div className="shrink-0 rounded-xl bg-blue-50 p-3">
+              <FileSpreadsheet className="h-7 w-7 text-blue-600" aria-hidden />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-base font-semibold text-gray-900">
+                Choose your data
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Pick an Excel file you have already uploaded. No duplicate upload is created.
+              </p>
+
+              <div className="mt-4">
+                <Button onClick={() => setPickerOpen(true)} className="h-9">
+                  <FolderOpen className="h-4 w-4 mr-2" /> Open file picker
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Upload new Excel */}
+        <div
+          className="rounded-2xl border shadow-sm hover:shadow-md transition-shadow ring-1 ring-gray-200 hover:ring-blue-300 bg-white"
+          role="group"
+          aria-label="Upload new Excel file"
+        >
+          <div className="p-5">
+            {/* Compact, meaningful dropzone content (keeps height small) */}
+            <div className="mt-4">
+              <div
+                {...getRootProps({
+                  onClick: open, // ensure click opens the file picker
+                  onKeyDown: (e: any) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      open();
+                    }
+                  },
+                })}
+                className={`cursor-pointer border-2 border-dashed rounded-xl px-4 py-4 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                  isDragActive ? "border-emerald-400 bg-emerald-50" : "border-gray-300 hover:border-gray-400"
+                }`}
+                role="button"
+                tabIndex={0}
+                aria-label="Excel drop area. Click to browse or drag and drop."
+              >
+                <input {...getInputProps()} />
+                <div className="flex items-center justify-between gap-3">
+                  {/* Left: Icon + concise copy */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="shrink-0 rounded-md bg-gray-100 p-2">
+                      <UploadIcon className="h-5 w-5 text-gray-600" aria-hidden />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900 truncate">
+                        Click to choose an Excel file
+                      </div>
+                      <div className="text-xs text-gray-600 truncate">
+                        Or drag & drop — ideal columns: <code>Date</code>, <code>Ticker</code>, <code>Price</code> (wide format works too)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: tiny chips (keep height, add meaning) */}
+                  <div className="hidden sm:flex items-center gap-2 shrink-0">
+                    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-gray-700">
+                      <FileSpreadsheet className="h-3 w-3" /> .xlsx
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-gray-700">
+                      <FileSpreadsheet className="h-3 w-3" /> .xls
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-gray-700">
+                      <InfoIcon className="h-3 w-3" /> Date · Ticker · Price
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Selected file summary and upload CTA */}
+              {selectedFile && (
+                <div className="mt-3 flex items-center justify-between rounded-lg border bg-gray-50 px-3 py-2">
+                  <div className="text-sm truncate">
+                    <span className="font-medium">{selectedFile.name}</span>{" "}
+                    <span className="text-gray-500">
+                      • {((selectedFile.size / 1024 / 1024) || 0).toFixed(2)} MB
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button onClick={uploadFile} disabled={uploadState === "uploading"}>
+                      {uploadState === "uploading" ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Uploading…
+                        </>
+                      ) : (
+                        <>
+                          <UploadIcon className="mr-2 h-4 w-4" /> Upload Excel
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Upload progress (if any) */}
+              {uploadState === "uploading" && (
+                <div className="mt-2">
+                  <Progress value={uploadProgress} />
+                  <div className="mt-1 text-xs text-gray-500" aria-live="polite">
+                    {uploadProgress}% uploaded
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -410,11 +763,15 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h2 className="text-2xl font-bold">{fileId ? "Configure Beta Model Analysis" : "Custom Beta Model Analysis"}</h2>
+          <h2 className="text-2xl font-bold">
+            {activeFileId
+              ? "Configure Beta Model Analysis"
+              : "Custom Beta Model Analysis"}
+          </h2>
           <p className="text-muted-foreground">
-            {fileId
+            {activeFileId
               ? "Configure and run the universal model on your selected dataset"
-              : "Upload your data, run the universal model, and view personalized results"}
+              : "Choose your data, run the universal model, and view personalized results"}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -429,19 +786,22 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
       {/* Error Alert */}
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" role="alert">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      {/* Step 1: File Upload */}
+      {/* Step 1: Choose / Upload Data */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <span
               className={`w-6 h-6 rounded-full flex items-center justify-center text-sm ${
-                fileId || uploadState === "uploaded" || uploadState === "processing" || uploadState === "completed"
+                activeFileId ||
+                uploadState === "uploaded" ||
+                uploadState === "processing" ||
+                uploadState === "completed"
                   ? "bg-green-600 text-white"
                   : uploadState === "uploading"
                   ? "bg-blue-600 text-white"
@@ -450,24 +810,26 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
             >
               1
             </span>
-            {fileId ? "Selected Data File" : "Upload Your Data"}
+            {activeFileId ? "Selected Data File" : "Choose your data"}
           </CardTitle>
           <CardDescription>
-            {fileId
-              ? "File selected from My Data - ready for analysis"
-              : "Upload a CSV or Excel file with columns: Date, Ticker, Price (or Date + ticker columns)"}
+            {activeFileId
+              ? "File selected from My Data — ready for analysis"
+              : "Pick an existing Excel file from My Data, or upload a new Excel file (.xlsx or .xls)."}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {fileId && preUploadedFileInfo ? (
-            // Show pre-uploaded file information
+          {activeFileId && preUploadedFileInfo ? (
+            // Selected pre-uploaded file information + actions
             <div className="space-y-3">
               <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
                 <div className="flex items-center gap-3">
                   <CheckCircle className="h-5 w-5 text-blue-600" />
                   <div>
                     <p className="font-medium text-blue-900">Using Pre-uploaded File</p>
-                    <p className="text-sm text-blue-700">{preUploadedFileInfo.filename}</p>
+                    <p className="text-sm text-blue-700">
+                      {preUploadedFileInfo.filename}
+                    </p>
                     <p className="text-xs text-blue-600">
                       {clientStatus?.n_rows
                         ? `${clientStatus.n_rows.toLocaleString()} rows, ${clientStatus.n_cols} columns`
@@ -475,7 +837,14 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                     </p>
                   </div>
                 </div>
-                <Badge variant="outline" className="text-blue-700 border-blue-300">Ready for Analysis</Badge>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="text-blue-700 border-blue-300">
+                    Ready for Analysis
+                  </Badge>
+                  <Button variant="outline" onClick={() => setPickerOpen(true)}>
+                    Change data source
+                  </Button>
+                </div>
               </div>
               <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded-lg">
                 <p className="font-medium mb-1">File already uploaded from My Data</p>
@@ -483,54 +852,30 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
               </div>
             </div>
           ) : uploadState === "idle" || uploadState === "error" || uploadState === "uploading" ? (
-            <div className="space-y-4">
-              <div
-                {...getRootProps()}
-                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-                  isDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 hover:border-gray-400"
-                }`}
-              >
-                <input {...getInputProps()} />
-                <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                {selectedFile ? (
-                  <div>
-                    <p className="text-sm font-medium">{selectedFile.name}</p>
-                    <p className="text-xs text-gray-500">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm text-gray-600">{isDragActive ? "Drop the file here" : "Drag & drop a CSV or Excel file here, or click to select"}</p>
-                    <p className="text-xs text-gray-500 mt-1">Supported: CSV (.csv), Excel (.xlsx, .xls) | Expected: Date, Ticker, Price columns or Date + ticker columns</p>
-                  </div>
-                )}
-              </div>
-
-              {selectedFile && (
-                <Button onClick={uploadFile} disabled={uploadState === "uploading"} className="w-full">
-                  {uploadState === "uploading" ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="mr-2 h-4 w-4" /> Upload File
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
+            // Two-tile layout: Choose vs Upload
+            <SourceTiles />
           ) : (
-            // Show uploaded file status for regular upload workflow
+            // Show uploaded file status (ad-hoc upload) + allow switching to My Data
             <div className="space-y-3">
               <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600" />
-                  <div>
-                    <p className="font-medium">{clientStatus?.filename}</p>
-                    <p className="text-sm text-gray-600">{clientStatus?.n_rows?.toLocaleString()} rows, {clientStatus?.n_cols} columns</p>
-                  </div>
                 </div>
-                <Badge variant="outline" className="text-green-700 border-green-300">Uploaded</Badge>
+                <div className="flex-1">
+                  <p className="font-medium">{clientStatus?.filename}</p>
+                  <p className="text-sm text-gray-600">
+                    {clientStatus?.n_rows?.toLocaleString()} rows,{" "}
+                    {clientStatus?.n_cols} columns
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-green-700 border-green-300">
+                    Uploaded
+                  </Badge>
+                  <Button variant="outline" onClick={() => setPickerOpen(true)}>
+                    Choose from My Data
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -543,7 +888,9 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
           <CardTitle className="flex items-center gap-2">
             <span
               className={`w-6 h-6 rounded-full flex items-center justify-center text-sm ${
-                uploadState === "uploaded" || uploadState === "processing" || uploadState === "completed"
+                uploadState === "uploaded" ||
+                uploadState === "processing" ||
+                uploadState === "completed"
                   ? "bg-blue-600 text-white"
                   : "bg-gray-400 text-white"
               }`}
@@ -552,7 +899,9 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
             </span>
             Configure Model
           </CardTitle>
-          <CardDescription>Select prediction horizon for your beta forecasting model</CardDescription>
+          <CardDescription>
+            Select prediction horizon for your beta forecasting model
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
@@ -572,11 +921,11 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-gray-500 mt-1">
-                  Note: server-side sector filtering is only applied if the uploaded dataset includes a 'sector' column and the backend is configured to use it.
+                  Note: server-side sector filtering is only applied if the uploaded dataset
+                  includes a <code>sector</code> column and the backend is configured to use it.
                 </p>
               </div>
 
-              {/* Replaced the bare Client ID input with a meaningful, user-facing box */}
               <div>
                 <DataSourceBox />
               </div>
@@ -584,12 +933,19 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
             {/* Advanced Model Training Parameters */}
             <div className="border-t pt-4 mt-4">
-              <h5 className="font-medium mb-4 text-sm text-gray-700">Advanced Model Training Parameters</h5>
+              <h5 className="font-medium mb-4 text-sm text-gray-700">
+                Advanced Model Training Parameters
+              </h5>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="trainingDays">Training Period (Days)</Label>
-                  <Select value={modelConfig.trainingDays} onValueChange={(value) => setModelConfig((prev) => ({ ...prev, trainingDays: value }))}>
+                  <Select
+                    value={modelConfig.trainingDays}
+                    onValueChange={(value) =>
+                      setModelConfig((prev) => ({ ...prev, trainingDays: value }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select training period" />
                     </SelectTrigger>
@@ -644,7 +1000,12 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
                 <div>
                   <Label htmlFor="alpha">Regularization Strength (Alpha)</Label>
-                  <Select value={modelConfig.alpha} onValueChange={(value) => setModelConfig((prev) => ({ ...prev, alpha: value }))}>
+                  <Select
+                    value={modelConfig.alpha}
+                    onValueChange={(value) =>
+                      setModelConfig((prev) => ({ ...prev, alpha: value }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select alpha" />
                     </SelectTrigger>
@@ -660,7 +1021,12 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
                 <div>
                   <Label htmlFor="l1Ratio">L1 Ratio (ElasticNet Mix)</Label>
-                  <Select value={modelConfig.l1Ratio} onValueChange={(value) => setModelConfig((prev) => ({ ...prev, l1Ratio: value }))}>
+                  <Select
+                    value={modelConfig.l1Ratio}
+                    onValueChange={(value) =>
+                      setModelConfig((prev) => ({ ...prev, l1Ratio: value }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select L1 ratio" />
                     </SelectTrigger>
@@ -680,12 +1046,21 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                       type="checkbox"
                       id="multiPeriod"
                       checked={modelConfig.multiPeriod === "true"}
-                      onChange={(e) => setModelConfig((prev) => ({ ...prev, multiPeriod: e.target.checked ? "true" : "false" }))}
+                      onChange={(e) =>
+                        setModelConfig((prev) => ({
+                          ...prev,
+                          multiPeriod: e.target.checked ? "true" : "false",
+                        }))
+                      }
                       className="rounded border-gray-300"
                     />
-                    <Label htmlFor="multiPeriod" className="text-sm">Multi-Period Analysis (1d, 5d, 10d, 20d)</Label>
+                    <Label htmlFor="multiPeriod" className="text-sm">
+                      Multi-Period Analysis (1d, 5d, 10d, 20d)
+                    </Label>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">Run predictions for all time horizons</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Run predictions for all time horizons
+                  </p>
                 </div>
               </div>
             </div>
@@ -710,7 +1085,15 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm ${uploadState === "completed" ? "bg-green-600 text-white" : "bg-blue-600 text-white"}`}>3</span>
+              <span
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-sm ${
+                  uploadState === "completed"
+                    ? "bg-green-600 text-white"
+                    : "bg-blue-600 text-white"
+                }`}
+              >
+                3
+              </span>
               Model Processing
             </CardTitle>
             <CardDescription>Universal beta model analysis in progress</CardDescription>
@@ -720,27 +1103,44 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
               {clientStatus && (
                 <>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{clientStatus.stage || "Processing"}</span>
-                    <span className="text-sm text-gray-500">{clientStatus.progress || 0}%</span>
+                    <span className="text-sm font-medium">
+                      {clientStatus.stage || "Processing"}
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      {clientStatus.progress || 0}%
+                    </span>
                   </div>
                   <Progress value={clientStatus.progress || 0} className="w-full" />
 
                   {uploadState === "completed" && clientStatus.results && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
                       <div className="text-center p-3 bg-blue-50 rounded-lg">
-                        <p className="text-2xl font-bold text-blue-600">{clientStatus.results.total_stocks || 0}</p>
+                        <p className="text-2xl font-bold text-blue-600">
+                          {clientStatus.results.total_stocks || 0}
+                        </p>
                         <p className="text-sm text-gray-600">Stocks Analyzed</p>
                       </div>
                       <div className="text-center p-3 bg-green-50 rounded-lg">
-                        <p className="text-2xl font-bold text-green-600">{horizonDays}d</p>
+                        <p className="text-2xl font-bold text-green-600">
+                          {horizonDays}d
+                        </p>
                         <p className="text-sm text-gray-600">Horizon</p>
                       </div>
                       <div className="text-center p-3 bg-purple-50 rounded-lg">
-                        <p className="text-2xl font-bold text-purple-600">{clientStatus.results.model_performance?.test_r2?.toFixed(4) || "N/A"}</p>
+                        <p className="text-2xl font-bold text-purple-600">
+                          {clientStatus.results.model_performance?.test_r2?.toFixed(4) ||
+                            "N/A"}
+                        </p>
                         <p className="text-sm text-gray-600">R² Score</p>
                       </div>
                       <div className="text-center p-3 bg-orange-50 rounded-lg">
-                        <p className="text-2xl font-bold text-orange-600">{clientStatus.results.model_performance?.test_dir_acc ? (clientStatus.results.model_performance.test_dir_acc * 100).toFixed(1) + "%" : "N/A"}</p>
+                        <p className="text-2xl font-bold text-orange-600">
+                          {clientStatus.results.model_performance?.test_dir_acc
+                            ? (clientStatus.results.model_performance.test_dir_acc *
+                                100
+                              ).toFixed(1) + "%"
+                            : "N/A"}
+                        </p>
                         <p className="text-sm text-gray-600">Directional Accuracy</p>
                       </div>
                     </div>
@@ -759,14 +1159,18 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
             <CardTitle className="flex items-center gap-2">
               <CheckCircle className="h-6 w-6 text-green-600" /> Results Ready
             </CardTitle>
-            <CardDescription>Your custom beta analysis is complete and ready to view</CardDescription>
+          <CardDescription>
+            Your custom beta analysis is complete and ready to view
+          </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <Alert>
                 <BarChart3 className="h-4 w-4" />
                 <AlertDescription>
-                  Analysis completed successfully! Your results are now available in the dashboard. The universal model has been trained on your data and predictions are ready.
+                  Analysis completed successfully! Your results are now available in
+                  the dashboard. The universal model has been trained on your data
+                  and predictions are ready.
                 </AlertDescription>
               </Alert>
 
@@ -774,7 +1178,9 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                 <Button
                   onClick={() => {
                     if (onResultsReady) {
-                      onResultsReady(clientId || String(fileId ?? ""));
+                      onResultsReady(
+                        activeFileId ? String(activeFileId) : clientId,
+                      );
                     } else {
                       navigateToDashboard();
                     }
@@ -783,12 +1189,25 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                 >
                   <BarChart3 className="mr-2 h-4 w-4" /> View Results Dashboard
                 </Button>
-                <Button variant="outline" onClick={resetWorkflow}>Run New Analysis</Button>
+                <Button variant="outline" onClick={resetWorkflow}>
+                  Run New Analysis
+                </Button>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* File picker modal mount */}
+      <FilePickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(id) => {
+          setPickerOpen(false);
+          setSelectedFile(null);
+          setActiveFileId(id); // triggers loadPreUploadedFile via effect
+        }}
+      />
     </div>
   );
 }
