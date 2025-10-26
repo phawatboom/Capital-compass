@@ -94,7 +94,7 @@ export default function HomePage() {
       </section>
 
       {/* Key Metrics */}
-      <section id="features" className="py-16 px-4 bg-slate-50">
+      {/* <section id="features" className="py-16 px-4 bg-slate-50">
         <div className="container mx-auto max-w-6xl">
           <h2 className="text-3xl font-bold text-center mb-12">Universal Model Features</h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -118,10 +118,10 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* How It Works */}
-      <section id="how-it-works" className="py-16 px-4 bg-white">
+      {/* <section id="how-it-works" className="py-16 px-4 bg-white">
         <div className="container mx-auto max-w-4xl">
           <h2 className="text-3xl font-bold text-center mb-12">How Universal Forecasting Works</h2>
           <div className="space-y-8">
@@ -163,7 +163,7 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* CTA Section
       <section className="py-16 px-4 bg-blue-500 text-white">

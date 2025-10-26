@@ -820,7 +820,7 @@ function UploadsPageInner() {
                                 onClick={() => handleAnalyze(u.id)}
                                 title="Configure and Run Universal Beta Analysis"
                               >
-                                Configure & Analyze
+                                Analyse
                               </Button>
                               <Button
                                 type="button"
