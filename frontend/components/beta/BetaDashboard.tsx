@@ -10,12 +10,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 /** API base URL - adjust based on your backend configuration */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Build absolute URLs robustly and safely encode path segments */
+const api = (path: string) => new URL(path, API_BASE).toString();
+const seg = (s: string) => encodeURIComponent(String(s).trim());
 
 interface BetaSummary {
   ticker: string;
@@ -62,9 +75,12 @@ export function BetaDashboard() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [sharedStats, setSharedStats] = useState<SharedStats | null>(null);
 
+  // Modal state
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
   /** Load shared/global factor stats */
   useEffect(() => {
-    fetch(`${API_BASE}/api/factors/shared/`)
+    fetch(api("/api/factors/shared/"))
       .then((res) => res.json())
       .then(setSharedStats)
       .catch(() => {
@@ -72,12 +88,13 @@ export function BetaDashboard() {
       });
   }, []);
 
+  /** Summary fetch */
   const fetchSummaryData = async () => {
     setLoading(true);
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE}/api/factors/summary/`, {
+      const response = await fetch(api("/api/factors/summary/"), {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -99,25 +116,46 @@ export function BetaDashboard() {
     }
   };
 
+  /** Time series fetch with safe encoding and gentle fallbacks for slashy tickers */
   const fetchTimeSeriesData = async (ticker: string) => {
     if (!ticker) return;
-
     setTimeSeriesLoading(true);
+    setError("");
+
+    const tryFetch = async (symbol: string) => {
+      const url = api(`/api/beta/timeseries/${seg(symbol)}/`);
+      return fetch(url, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+    };
 
     try {
-      const response = await fetch(`${API_BASE}/api/beta/timeseries/${ticker}/`, {
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      // Primary attempt with raw ticker (encoded)
+      let res = await tryFetch(ticker);
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch time series data: ${response.statusText}`);
+      // If not found and ticker contains slash, try common aliases
+      if (res.status === 404 && ticker.includes("/")) {
+        // 1) Replace slash with hyphen (e.g., BRK/B UN -> BRK-B UN)
+        const aliasDash = ticker.replace(/\//g, "-").trim();
+        res = await tryFetch(aliasDash);
+
+        // 2) If still not found, drop the slash entirely (e.g., BRK/B UN -> BRKB UN)
+        if (res.status === 404) {
+          const aliasNoSlash = ticker.replace(/\//g, "").trim();
+          res = await tryFetch(aliasNoSlash);
+        }
       }
 
-      const data = await response.json();
-      setTimeSeriesData(data as BetaTimeSeriesData);
+      if (!res.ok) {
+        // At this point, we surface a clear error for the modal
+        const msg = `Failed to fetch time series data: ${res.status} ${res.statusText}`;
+        setTimeSeriesData(null);
+        throw new Error(msg);
+      }
+
+      const data = (await res.json()) as BetaTimeSeriesData;
+      setTimeSeriesData(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch time series data");
       console.error("Error fetching time series data:", err);
@@ -126,8 +164,11 @@ export function BetaDashboard() {
     }
   };
 
+  /** Handle ticker click: open modal and fetch its series */
   const handleTickerSelect = (ticker: string) => {
     setSelectedTicker(ticker);
+    setIsDialogOpen(true);
+    setTimeSeriesData(null); // reset previous chart data while loading
     fetchTimeSeriesData(ticker);
   };
 
@@ -135,6 +176,16 @@ export function BetaDashboard() {
   useEffect(() => {
     fetchSummaryData();
   }, []);
+
+  // Close dialog handler
+  const handleDialogOpenChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) {
+      // Optional: keep selection for context, or clear here.
+      // setSelectedTicker("");
+      // setTimeSeriesData(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -146,9 +197,7 @@ export function BetaDashboard() {
             Monitor and analyze beta coefficient predictions across your stock portfolio
           </p>
           {lastUpdated && (
-            <p className="text-sm text-gray-500 mt-1">
-              Last updated: {lastUpdated.toLocaleString()}
-            </p>
+            <p className="text-sm text-gray-500 mt-1">Last updated: {lastUpdated.toLocaleString()}</p>
           )}
         </div>
       </div>
@@ -170,9 +219,7 @@ export function BetaDashboard() {
               <CardTitle className="text-sm font-medium">Global R² Score</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {sharedStats.r2_global?.toFixed(4) ?? "N/A"}
-              </div>
+              <div className="text-2xl font-bold">{sharedStats.r2_global?.toFixed(4) ?? "N/A"}</div>
               <p className="text-xs text-muted-foreground">Model fit quality across all tickers</p>
             </CardContent>
           </Card>
@@ -196,9 +243,7 @@ export function BetaDashboard() {
               <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {sharedStats.y_intercept?.toFixed(3) ?? "N/A"}
-              </div>
+              <div className="text-2xl font-bold">{sharedStats.y_intercept?.toFixed(3) ?? "N/A"}</div>
               <p className="text-xs text-muted-foreground">
                 Model baseline term (average intercept across all tickers)
               </p>
@@ -215,11 +260,9 @@ export function BetaDashboard() {
                 const coefEntries = Object.entries(sharedStats ?? {}).filter(
                   (e): e is [string, number] => e[0].startsWith("coef_") && isFiniteNumber(e[1])
                 );
-
                 if (coefEntries.length === 0) {
                   return <div className="text-sm text-gray-500">N/A</div>;
                 }
-
                 const top = [...coefEntries].sort((a, b) => b[1] - a[1])[0];
                 return (
                   <>
@@ -241,11 +284,9 @@ export function BetaDashboard() {
                 const coefEntries = Object.entries(sharedStats ?? {}).filter(
                   (e): e is [string, number] => e[0].startsWith("coef_") && isFiniteNumber(e[1])
                 );
-
                 if (coefEntries.length === 0) {
                   return <div className="text-sm text-gray-500">N/A</div>;
                 }
-
                 const bottom = [...coefEntries].sort((a, b) => a[1] - b[1])[0];
                 return (
                   <>
@@ -259,43 +300,46 @@ export function BetaDashboard() {
         </div>
       )}
 
-      {/* Main Content */}
-      <Tabs defaultValue="summary" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="summary">Summary Table</TabsTrigger>
-          <TabsTrigger value="timeseries" disabled={!selectedTicker}>
-            Time Series {selectedTicker && `(${selectedTicker})`}
-          </TabsTrigger>
-        </TabsList>
+      {/* Summary Table (clicking a ticker opens the dialog) */}
+      <BetaSummaryTable data={summaryData} loading={loading} onTickerSelect={handleTickerSelect} />
 
-        <TabsContent value="summary" className="space-y-4">
-          <BetaSummaryTable
-            data={summaryData}
-            loading={loading}
-            onTickerSelect={handleTickerSelect}
-          />
-        </TabsContent>
+      {/* Time Series Modal */}
+      <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="sm:max-w-[1200px] w-[95vw]">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedTicker ? `Time Series — ${selectedTicker}` : "Time Series"}
+            </DialogTitle>
+            <DialogDescription>
+              Historical and predicted beta with confidence bands.
+            </DialogDescription>
+          </DialogHeader>
 
-        <TabsContent value="timeseries" className="space-y-4">
-          {selectedTicker ? (
-            <BetaTimeSeriesChart data={timeSeriesData} loading={timeSeriesLoading} />
-          ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>Time Series Analysis</CardTitle>
-                <CardDescription>
-                  Select a ticker from the summary table to view detailed time series analysis
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-center h-48 text-gray-500">
-                  No ticker selected
+          <div className="mt-2">
+            {timeSeriesLoading ? (
+              <div className="h-64 flex items-center justify-center text-muted-foreground">
+                Loading…
+              </div>
+            ) : timeSeriesData ? (
+              <BetaTimeSeriesChart data={timeSeriesData} loading={false} />
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center text-center text-muted-foreground">
+                <div className="mb-2">No time series data available for this ticker.</div>
+                <div className="text-xs">
+                  If the symbol contains a slash (e.g., BRK/B), it may require an alias on the
+                  backend (e.g., BRK-B or BRKB).
                 </div>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-      </Tabs>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-4">
+            <DialogClose asChild>
+              <Button variant="outline">Close</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
