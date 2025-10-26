@@ -10,37 +10,36 @@ export default function HomePage() {
       <section className="py-20 px-4">
         <div className="container mx-auto text-center max-w-4xl">
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
-            Universal Beta Forecasting with
-            <span className="text-blue-600"> Cross-Sectional Learning</span>
+            Beta Forecasting with
+            <span className="text-blue-500"> ARIMA Model</span>
           </h1>
-          <p className="text-xl text-gray-600 mb-8 leading-relaxed">
-            Next-generation beta coefficient prediction using our Universal Pooled Model. 
-            Leverage information from 518 stocks with advanced cross-sectional learning and elastic net regularization.
+          <p className="text-lg text-gray-600 mb-2 leading-relaxed">
+            Our model captures how each stock’s short-term behavior shifts relative to its peers and market volatility, using advanced ElasticNet regression to forecast next-period β values across multiple horizons -s revealing the real-time balance between mean reversion and momentum.
           </p>
           <div className="grid md:grid-cols-3 gap-4 mb-8 text-center">
-            <div className="bg-white p-4 rounded-lg shadow-sm">
-              <p className="text-2xl font-bold text-blue-600">58.4%</p>
+            {/* <div className="bg-white p-4 rounded-lg shadow-sm">
+              <p className="text-2xl font-bold text-blue-500">58.4%</p>
               <p className="text-sm text-gray-600">Directional Accuracy</p>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow-sm">
-              <p className="text-2xl font-bold text-green-600">518</p>
+            </div> */}
+            {/* <div className="bg-white p-4 rounded-lg shadow-sm">
+              <p className="text-2xl font-bold text-green-500">544</p>
               <p className="text-sm text-gray-600">Stock Universe</p>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow-sm">
-              <p className="text-2xl font-bold text-purple-600">60K+</p>
+            </div> */}
+            {/* <div className="bg-white p-4 rounded-lg shadow-sm">
+              <p className="text-2xl font-bold text-purple-500">60K+</p>
               <p className="text-sm text-gray-600">Predictions Generated</p>
-            </div>
+            </div> */}
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/beta">
               <Button size="lg" className="text-lg px-8 py-3">
-                View Universal Dashboard
+                View Results
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
             <Link href="/upload">
               <Button variant="outline" size="lg" className="text-lg px-8 py-3 bg-transparent">
-                Upload Stock Data
+                Upload Data
               </Button>
             </Link>
           </div>
@@ -72,7 +71,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Combines information from 518 stocks with 23 engineered features including momentum, volatility, 
+                  Combines information from 544 stocks with 23 engineered features including momentum, volatility, 
                   technical indicators, and cross-sectional rankings to deliver superior forecasting accuracy.
                 </CardDescription>
               </CardContent>
@@ -127,19 +126,19 @@ export default function HomePage() {
           <h2 className="text-3xl font-bold text-center mb-12">How Universal Forecasting Works</h2>
           <div className="space-y-8">
             <div className="flex items-start space-x-4">
-              <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+              <div className="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
                 1
               </div>
               <div>
                 <h3 className="font-semibold text-lg mb-2">Cross-Sectional Data Processing</h3>
                 <p className="text-gray-600">
-                  Our system processes data from 518 stocks simultaneously, computing historical betas, momentum indicators, 
+                  Our system processes data from 544 stocks simultaneously, computing historical betas, momentum indicators, 
                   volatility measures, and cross-sectional rankings to capture market-wide patterns.
                 </p>
               </div>
             </div>
             <div className="flex items-start space-x-4">
-              <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+              <div className="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
                 2
               </div>
               <div>
@@ -151,7 +150,7 @@ export default function HomePage() {
               </div>
             </div>
             <div className="flex items-start space-x-4">
-              <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
+              <div className="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold">
                 3
               </div>
               <div>
@@ -166,8 +165,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-16 px-4 bg-blue-600 text-white">
+      {/* CTA Section
+      <section className="py-16 px-4 bg-blue-500 text-white">
         <div className="container mx-auto text-center max-w-3xl">
           <h2 className="text-3xl font-bold mb-6">Ready for Next-Generation Beta Forecasting?</h2>
           <p className="text-xl mb-8 opacity-90">
@@ -181,12 +180,12 @@ export default function HomePage() {
             </Button>
           </Link>
         </div>
-      </section>
+      </section> */}
 
       {/* Footer */}
       <footer className="bg-gray-900 text-white py-12 px-4">
         <div className="container mx-auto max-w-6xl">
-          <div className="grid md:grid-cols-4 gap-8">
+          {/* <div className="grid md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center space-x-2 mb-4">
                 <BarChart3 className="h-6 w-6" />
@@ -254,9 +253,9 @@ export default function HomePage() {
                 </li>
               </ul>
             </div>
-          </div>
-          <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2025 Universal Beta Platform. Advanced cross-sectional learning by Team Bobbers.</p>
+          </div> */}
+          <div className="border-t border-gray-800 text-center text-gray-400">
+            <p>&copy; 2025 Capital Compass - Team Bobbers.</p>
           </div>
         </div>
       </footer>

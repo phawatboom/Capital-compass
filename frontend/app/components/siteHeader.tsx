@@ -128,6 +128,9 @@ export default function SiteHeader() {
       <Link href="/stocks" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Stocks
       </Link>
+      <Link href="/beta" className="py-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
+        Results
+      </Link>
     </>
   );
 

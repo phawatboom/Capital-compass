@@ -172,7 +172,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
       </CardHeader>
 
       <CardContent>
-        {/* Filters */}
+        {/* Filters
         <div className="flex gap-4 mb-6">
           <div className="flex-1">
             <Input
@@ -193,7 +193,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
               <SelectItem value="Low">Low Confidence</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </div> */}
 
         {/* Results Summary */}
         <div className="mb-4 text-sm text-gray-600">
