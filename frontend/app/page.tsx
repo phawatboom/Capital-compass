@@ -1,11 +1,11 @@
-import { ArrowRight, Upload, BarChart3, TrendingUp, Shield, Zap } from "lucide-react"
+import { ArrowRight, BarChart3, TrendingUp, Shield, Zap } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-0">
+    <div className="min-h-dvh flex flex-col bg-gradient-to-br from-slate-50 to-blue-50 p-0">
       {/* Hero Section */}
       <section className="py-20 px-4">
         <div className="container mx-auto text-center max-w-4xl">
@@ -183,75 +183,6 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="bg-gray-900 text-white py-4 px-4">
         <div className="container mx-auto max-w-6xl">
-          {/* <div className="grid md:grid-cols-4 gap-8">
-            <div>
-              <div className="flex items-center space-x-2 mb-4">
-                <BarChart3 className="h-6 w-6" />
-                <span className="text-xl font-bold">Universal Beta Platform</span>
-              </div>
-              <p className="text-gray-400">Cross-sectional learning for institutional-grade beta coefficient forecasting.</p>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Platform</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>
-                  <Link href="/beta" className="hover:text-white">
-                    Universal Dashboard
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/upload" className="hover:text-white">
-                    Upload Data
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#features" className="hover:text-white">
-                    Features
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Company</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>
-                  <Link href="/about" className="hover:text-white">
-                    About
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/contact" className="hover:text-white">
-                    Contact
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/pricing" className="hover:text-white">
-                    Pricing
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Resources</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>
-                  <Link href="/stocks" className="hover:text-white">
-                    Stock Analysis
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/dashboard" className="hover:text-white">
-                    Analytics Dashboard
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#how-it-works" className="hover:text-white">
-                    How It Works
-                  </Link>
-                </li>
-              </ul>
-            </div>
-          </div> */}
           <div className="border-t border-gray-800 text-center text-gray-400">
             <p>&copy; 2025 Capital Compass - Team Bobbers</p>
           </div>

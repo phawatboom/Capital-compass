@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState } from "react";
-import { BarChart3, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/app/lib/authContext";
 
@@ -53,11 +54,11 @@ function Portal({ children }: { children: React.ReactNode }) {
 
 export default function SiteHeader() {
   const { me, loading, logout } = useAuth();
-  const { authenticated, username } = me as any;
+  const { authenticated, username } = (me as any) ?? { authenticated: false, username: undefined };
 
   const [open, setOpen] = useState(false);
 
-  // Optional: fetch avatar URL if your auth context doesn't include it.
+  // Optional: fetch avatar URL if your auth context does not include it.
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,7 +69,7 @@ export default function SiteHeader() {
       return;
     }
 
-    // If your auth context already has an avatar URL, prefer it
+    // Prefer an avatar already present in context
     const inContext =
       (me as any)?.avatarUrl ||
       (me as any)?.avatar_url ||
@@ -120,7 +121,7 @@ export default function SiteHeader() {
   const NavLinks = ({ onClick }: { onClick?: () => void }) => (
     <>
       <Link href="/" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
-      Home
+        Home
       </Link>
       <Link href="/data" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
         My Data
@@ -175,8 +176,17 @@ export default function SiteHeader() {
     <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur print:hidden dark:bg-background/80">
       <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand */}
-        <Link href="/" className="flex items-center gap-2">
-          <BarChart3 className="h-7 w-7 text-blue-600" aria-hidden />
+        <Link href="/" className="flex items-center gap-2" aria-label="Home">
+          {/* If your logo is dark-on-transparent, keep dark:invert.
+             Remove dark:invert if you provide a dedicated light logo. */}
+          <Image
+            src="/logo.png"
+            alt="Capital Compass"
+            width={28}
+            height={28}
+            priority
+            className="h-7 w-7 dark:invert"
+          />
           <span className="text-xl font-bold text-gray-900 dark:text-foreground">Capital Compass</span>
           <span className="sr-only">Go to home</span>
         </Link>
@@ -223,7 +233,14 @@ export default function SiteHeader() {
           >
             <div className="flex items-center justify-between border-b px-4 py-4">
               <div className="flex items-center gap-2">
-                <BarChart3 className="h-6 w-6 text-blue-600" />
+                <Image
+                  src="/logo.png"
+                  alt="Capital Compass"
+                  width={24}
+                  height={24}
+                  priority
+                  className="h-6 w-6 dark:invert"
+                />
                 <span className="text-lg font-semibold">Capital Compass</span>
               </div>
               <Button
