@@ -71,8 +71,8 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-base">
-                  Combines information from 544 stocks with 23 engineered features including momentum, volatility, 
-                  technical indicators, and cross-sectional rankings to deliver superior forecasting accuracy.
+                  Combines data from hundreds of stocks with 23 engineered features including momentum, volatility, 
+                  technical indicators, and cross-sectional rankings.
                 </CardDescription>
               </CardContent>
             </Card>
@@ -183,7 +183,7 @@ export default function HomePage() {
       </section> */}
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-white py-12 px-4">
+      <footer className="bg-gray-900 text-white py-4 px-4">
         <div className="container mx-auto max-w-6xl">
           {/* <div className="grid md:grid-cols-4 gap-8">
             <div>
@@ -255,7 +255,7 @@ export default function HomePage() {
             </div>
           </div> */}
           <div className="border-t border-gray-800 text-center text-gray-400">
-            <p>&copy; 2025 Capital Compass - Team Bobbers.</p>
+            <p>&copy; 2025 Capital Compass - Team Bobbers</p>
           </div>
         </div>
       </footer>
