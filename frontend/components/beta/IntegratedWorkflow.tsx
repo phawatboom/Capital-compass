@@ -549,8 +549,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                         <SelectItem value="252">1 Year (252 days)</SelectItem>
                         <SelectItem value="504">2 Years (504 days)</SelectItem>
                         <SelectItem value="756">3 Years (756 days)</SelectItem>
-                          <SelectItem value="756">4 Years (1008 days)</SelectItem>
-                          <SelectItem value="126">5 Years (1260 days)</SelectItem>
+                          <SelectItem value="1008">4 Years (1008 days)</SelectItem>
+                          <SelectItem value="1260">5 Years (1260 days)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

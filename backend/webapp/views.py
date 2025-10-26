@@ -39,6 +39,7 @@ from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResu
 from datetime import date, datetime
 from django.contrib.auth import update_session_auth_hash
 from rest_framework.decorators import parser_classes
+from .model_runner import run_analysis_from_web
 
 
 def _model_field_names(model_cls):
@@ -1029,15 +1030,11 @@ def change_password(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def analyze_upload(request, pk: int):
-    """Legacy analyze endpoint - replaced by integrated workflow"""
     try:
-        # This endpoint has been replaced by the integrated workflow
-        # /api/integrated/upload/ -> /api/integrated/run-model/
-        return Response({
-            "ok": False, 
-            "error": "This endpoint has been replaced by the integrated workflow. Please use /api/integrated/upload/ and /api/integrated/run-model/",
-            "redirect": "/api/integrated/upload/"
-        }, status=status.HTTP_410_GONE)
+        result = run_analysis_from_web(upload_pk=pk, model_for_pred="enet")
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error", "Unknown error"))
+        return Response(result, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"ok": False, "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
