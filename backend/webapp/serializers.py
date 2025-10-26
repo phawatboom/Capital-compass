@@ -256,12 +256,35 @@ class StockFactorResultSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockFactorResult
         fields = [
-            "id", "ticker", "b_coefficient", "y_intercept", "volatility",
-            "train_b", "lag_train_b", "ar1_corr_10d", "ar1_corr_20d", "ar1_corr_60d",
-            "sign_persist_20d", "sign_persist_60d", "ret_1d", "ret_5d", "ret_20d",
-            "vol_63d", "vol_126d", "vol_252d", "vol_756d", "Z_ma_20d",
-            "cs_rank_ret_1d", "cs_rank_ret_5d", "cs_rank_ret_20d", "cs_rank_ret_20d",
-            "created_at", "shared_stats_id"
+            "id",
+            "ticker",
+            "b_coefficient",
+            "y_intercept",
+            "volatility",
+            "train_b",
+            "lag_train_b",
+            "ar1_corr_10d",
+            "ar1_corr_20d",
+            "ar1_corr_60d",
+            "sign_persist_20d",
+            "sign_persist_60d",
+            "ret_1d",
+            "ret_5d",
+            "ret_20d",
+            "vol_63d",
+            "vol_126d",
+            "vol_252d",
+            "vol_756d",
+            "Z_ma_20d",
+            "cs_rank_ret_1d",
+            "cs_rank_ret_5d",
+            "cs_rank_ret_20d",
+            "cs_rank_z_ma_20d",
+            "xsec_disp_1d",
+            "xsec_disp_30d",
+            "created_at",
+            "shared_stats_id",
+            "horizon_days",  
         ]
 
 
@@ -282,6 +305,7 @@ class StockFactorTimeSeriesSerializer(serializers.ModelSerializer):
             "vol_252d",
             "vol_756d",
             "Z_ma_20d",
+            "horizon_days",
         ]
 
 # Pooled Model Output Serializers
