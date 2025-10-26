@@ -197,7 +197,7 @@ export function BetaDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {sharedStats.y_intercept?.toFixed(32) ?? "N/A"}
+                {sharedStats.y_intercept?.toFixed(3) ?? "N/A"}
               </div>
               <p className="text-xs text-muted-foreground">
                 Model baseline term (average intercept across all tickers)

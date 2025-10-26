@@ -174,7 +174,16 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     if (fileId) {
       try {
         setUploadState("processing");
-        const { data } = await api.post(`/csv-uploads/${fileId}/analyze/`);
+        const payload = {
+          horizon_days: parseInt(horizonDays),
+          training_days: parseInt(modelConfig.trainingDays),
+          testing_days: parseInt(modelConfig.testingDays),
+          alpha: parseFloat(modelConfig.alpha),
+          l1_ratio: parseFloat(modelConfig.l1Ratio),
+          multi_period: modelConfig.multiPeriod === "true",
+        };
+
+        const { data } = await api.post(`/csv-uploads/${fileId}/analyze/`, payload);
         if (data?.ok || data?.success) {
           setUploadState("completed");
           if (onResultsReady) onResultsReady(String(fileId));
@@ -288,7 +297,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
   const navigateToDashboard = () => {
     // Navigate to My Data page with analysis tab active
-    router.push("/data?tab=analysis");
+    router.push("/beta");
   };
 
   const getStatusIcon = () => {
@@ -596,16 +605,41 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
                 <div>
                   <Label htmlFor="testingDays">Testing Period (Days)</Label>
-                  <Select value={modelConfig.testingDays} onValueChange={(value) => setModelConfig((prev) => ({ ...prev, testingDays: value }))}>
+                  <Select
+                    value={modelConfig.testingDays}
+                    onValueChange={(value) =>
+                      setModelConfig((prev) => ({ ...prev, testingDays: value }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select testing period" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="252">1 Year (252 days)</SelectItem>
-                      <SelectItem value="504">2 Years (504 days)</SelectItem>
-                      <SelectItem value="756">3 Years (756 days)</SelectItem>
+                      {[
+                        { value: "252", label: "1 Year (252 days)" },
+                        { value: "504", label: "2 Years (504 days)" },
+                        { value: "756", label: "3 Years (756 days)" },
+                      ].map((opt) => {
+                        const trainDays = parseInt(modelConfig.trainingDays);
+                        const testDays = parseInt(opt.value);
+                        const disabled = testDays >= trainDays;
+                        return (
+                          <SelectItem
+                            key={opt.value}
+                            value={opt.value}
+                            disabled={disabled}
+                            className={disabled ? "opacity-50 cursor-not-allowed" : ""}
+                          >
+                            {opt.label}
+                            {disabled && " (must be < training period)"}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Testing period must be shorter than training period.
+                  </p>
                 </div>
 
                 <div>
