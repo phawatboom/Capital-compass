@@ -100,7 +100,7 @@ urlpatterns = [
     
     # Integrated Client Workflow endpoints (Upload -> Process -> View)
     path('integrated/upload/', IntegratedUploadView.as_view(), name='integrated-upload'),
-    path('integrated/run-model/', analyze_upload, name='integrated-run-model'),
+    path('integrated/run-model/', RunModelView.as_view(), name='integrated-run-model'),
     path('integrated/status/<str:client_id>/', ClientStatusView.as_view(), name='integrated-status'),
     path('integrated/results/<str:client_id>/', ClientResultsView.as_view(), name='integrated-results'),
     path('integrated/clients/', ClientListView.as_view(), name='integrated-clients'),
