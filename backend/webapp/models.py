@@ -379,8 +379,10 @@ class FactorSharedStats(models.Model):
     r2_global = models.FloatField(null=True, blank=True)
     volatility_coeff = models.FloatField(null=True, blank=True)
 
+    horizon_days = models.IntegerField(default=5)
+
     def __str__(self):
-        return f"SharedStats ({self.model_used}) @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+        return f"SharedStats ({self.model_used}, {self.horizon_days}d) @ {self.created_at:%Y-%m-%d %H:%M:%S}"
 
 
 class StockFactorResult(models.Model):
@@ -423,8 +425,10 @@ class StockFactorResult(models.Model):
     xsec_disp_1d = models.FloatField(null=True, blank=True)
     xsec_disp_30d = models.FloatField(null=True, blank=True)
 
+    horizon_days = models.IntegerField(default=5)
+
     def __str__(self):
-        return f"{self.ticker} @ {self.created_at:%Y-%m-%d}"
+        return f"{self.ticker} ({self.horizon_days}d) @ {self.created_at:%Y-%m-%d}"
 
 # New Models for Pooled Model Outputs
 class AnalysisRun(models.Model):
