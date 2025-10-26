@@ -267,6 +267,7 @@ def _parse_date(date_str: str) -> date:
 # Helper function to process a single DataFrame (from CSV or Excel sheet)
 def process_data(df, file, data_type, upload_record):
     try:
+        t0 = time.time()
         data_to_process = []
         date_col_index = None
         stock_names_start_index = None
@@ -291,9 +292,8 @@ def process_data(df, file, data_type, upload_record):
         else:
             raise ValueError(f"Could not determine format for data type: {data_type}")
 
-        # ---- Find and prepare stock objects ----
+        # ---- Prepare stock names ----
         header_series = df.iloc[header_row_index, stock_names_start_index:].astype(str)
-
         exchange_codes = [' UN', ' UW', ' UQ', ' UF', '/B UN']
 
         if data_type == 'equity':
@@ -312,95 +312,67 @@ def process_data(df, file, data_type, upload_record):
         if not cleaned_stock_names:
             raise ValueError("No valid stock names found in header.")
 
-        # Bulk get_or_create for stocks
-        stocks_map = {name: Stock.objects.get_or_create(name=name)[0] for name in cleaned_stock_names}
+        print(f"✅ Parsed {len(cleaned_stock_names)} stock headers ({data_type}) in {time.time()-t0:.2f}s")
 
-        # ---- Process data points and collect them into a list ----
+        # ---- Map stocks ----
+        stocks_map = {name: Stock.objects.get_or_create(name=name)[0] for name in cleaned_stock_names}
+        print(f"✅ Prepared {len(stocks_map)} stock records in {time.time()-t0:.2f}s")
+
+        # ---- Collect all data tuples ----
         data_df = df.iloc[data_start_row_index:].reset_index(drop=True)
+        insert_tuples = []
         for _, row in data_df.iterrows():
             try:
                 date_str = str(row.iloc[date_col_index]).strip()
                 if not date_str:
                     continue
-                date_object = _parse_date(date_str)
+                date_obj = _parse_date(date_str)
             except (IndexError, ValueError):
                 continue
 
             for i, stock_name in enumerate(cleaned_stock_names):
-                value_raw = row.iloc[stock_names_start_index + i]
-                value = None
-
-                # Value parsing logic
-                if isinstance(value_raw, (int, float)):
-                    value = value_raw
-                elif isinstance(value_raw, str):
-                    value_str = value_raw.strip()
-                    if value_str not in ["#N/A", ""]:
-                        if data_type == 'return' and '%' in value_str:
-                            try:
-                                value = float(value_str.strip('%')) / 100.0
-                            except ValueError:
-                                continue
+                val_raw = row.iloc[stock_names_start_index + i]
+                try:
+                    if isinstance(val_raw, str):
+                        val_str = val_raw.strip()
+                        if val_str in ("", "#N/A"):
+                            continue
+                        # Handle percentage values
+                        if "%" in val_str:
+                            val = float(val_str.replace("%", "")) / 100.0
                         else:
-                            try:
-                                value = float(value_str)
-                            except ValueError:
-                                continue
+                            val = float(val_str)
+                    else:
+                        val = float(val_raw)
+                except Exception:
+                    continue
+                insert_tuples.append((stocks_map[stock_name].id, date_obj, data_type, val))
 
-                data_to_process.append({
-                    'stock': stocks_map[stock_name],
-                    'date': date_object,
-                    'data_type': data_type,
-                    'value': value,
-                })
+        print(f"✅ Built {len(insert_tuples):,} StockData tuples in {time.time()-t0:.2f}s")
 
-        # ---- Bulk operations ----
-        # 1. Get existing records in a single query
-        existing_records_filter = {
-            'stock__in': [d['stock'] for d in data_to_process],
-            'data_type': data_type,
-            'date__in': [d['date'] for d in data_to_process]
-        }
-        existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id', 'date', 'id')
+        # ---- SQL Upsert ----
+        CHUNK_SIZE = 20_000
+        insert_sql = """
+            INSERT INTO webapp_stockdata (stock_id, date, data_type, value)
+            VALUES %s
+            ON CONFLICT (stock_id, date, data_type)
+            DO UPDATE SET value = EXCLUDED.value;
+        """
 
-        # Create a map for fast lookup
-        existing_records_map = {
-            (rec['stock_id'], rec['date']): rec['id']
-            for rec in existing_records
-        }
+        t_upsert = time.time()
+        with connection.cursor() as cursor:
+            for i in range(0, len(insert_tuples), CHUNK_SIZE):
+                batch = insert_tuples[i:i + CHUNK_SIZE]
+                execute_values(cursor, insert_sql, batch)
+                if i % (CHUNK_SIZE * 5) == 0:
+                    print(f"  → batch {i//CHUNK_SIZE + 1} "
+                          f"({len(batch):,} rows) at {datetime.now().strftime('%H:%M:%S')}")
 
-        # 2. Separate into lists for creation and update
-        records_to_create = []
-        records_to_update = []
-
-        for data_point in data_to_process:
-            stock_id = data_point['stock'].id
-            date_val = data_point['date']
-
-            if (stock_id, date_val) in existing_records_map:
-                record_id = existing_records_map[(stock_id, date_val)]
-                records_to_update.append(
-                    StockData(
-                        id=record_id,
-                        stock=data_point['stock'],
-                        date=date_val,
-                        data_type=data_point['data_type'],
-                        value=data_point['value']
-                    )
-                )
-            else:
-                records_to_create.append(StockData(**data_point))
-
-        # 3. Perform bulk operations
-        if records_to_create:
-            StockData.objects.bulk_create(records_to_create, batch_size=5000)
-
-        if records_to_update:
-            StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
+        print(f"🏁 Upsert complete in {time.time()-t_upsert:.2f}s total")
+        print(f"⏱️ Overall process_data runtime: {time.time()-t0:.2f}s")
 
     except Exception as e:
         raise Exception(f"Failed to process {file.name}, data type: {data_type}. Error: {e}")
-
 
 # View to handle file uploads
 # --------------------------------------------------------------------------------------
@@ -421,34 +393,146 @@ class FileUploadView(APIView):
                 upload_record = serializer.save(user=request.user)  # <-- FIX: set the user
                 file_path = upload_record.filename.path
 
-                # Optional: process XLSX or CSV files as before
                 if file_path.endswith('.xlsx'):
-                    sheets_to_process = {'Prices': 'price', 'Returns': 'return'}
+                    # Use model-style reading logic for Excel
                     with pd.ExcelFile(file_path) as xls:
-                        for sheet_name, data_type in sheets_to_process.items():
-                            if sheet_name in xls.sheet_names:
-                                df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
-                                process_data(df, file_obj, data_type, upload_record)
+                        if "Returns" not in xls.sheet_names:
+                            raise ValueError("No 'Returns' sheet found in Excel file.")
+
+                        df = pd.read_excel(xls, sheet_name="Returns", header=None)
+
+                        # --- Detect header row containing "Date" ---
+                        header_row = None
+                        for i in range(min(50, len(df))):
+                            if df.iloc[i].astype(str).str.lower().eq("date").any():
+                                header_row = i
+                                break
+                        if header_row is None:
+                            raise ValueError("No header row containing 'Date' found in sheet.")
+
+                        # --- Assign columns and clean data ---
+                        cols = df.iloc[header_row].astype(str).str.strip().tolist()
+                        data_df = df.iloc[header_row + 1:].copy()
+                        data_df.columns = cols
+                        data_df = data_df.loc[:, ~(data_df.isna().all())]
+
+                        # Ensure 'Date' column is properly parsed
+                        date_col = next((c for c in data_df.columns if str(c).strip().lower() == "date"), None)
+                        if not date_col:
+                            raise ValueError("No 'Date' column found in sheet.")
+                        if date_col != "Date":
+                            data_df = data_df.rename(columns={date_col: "Date"})
+
+                        data_df["Date"] = pd.to_datetime(data_df["Date"], errors="coerce")
+                        data_df = data_df.dropna(subset=["Date"])
+
+                        data_to_process = []
+                        data_type = "return"
+
+                        # --- Create Stock and StockData entries ---
+                        stock_names = [c for c in data_df.columns if c != "Date"]
+                        if not stock_names:
+                            raise ValueError("No stock columns found in sheet.")
+
+                        # Bulk get_or_create for stocks
+                        stocks_map = {name.strip(): Stock.objects.get_or_create(name=name.strip())[0] for name in
+                                      stock_names}
+
+                        # Collect data points (similar structure to what process_data uses)
+                        for stock_name in stock_names:
+                            stock_obj = stocks_map[stock_name]
+                            for _, row in data_df.iterrows():
+                                val = row[stock_name]
+                                if pd.isna(val):
+                                    continue
+
+                                data_to_process.append({
+                                    'stock': stock_obj,
+                                    'date': row["Date"].date(),
+                                    'data_type': data_type,
+                                    'value': float(val),
+                                })
+
+                        # --- Start Upsert Logic ---
+
+                        # 1. Get existing records in a single query (Only query for the relevant stock/date/data_type)
+                        existing_records_filter = {
+                            'stock__in': [d['stock'] for d in data_to_process],
+                            'data_type': data_type,
+                            'date__in': [d['date'] for d in data_to_process]
+                        }
+                        existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id',
+                                                                                                      'date',
+                                                                                                      'data_type', 'id')
+
+                        # Create a map for fast lookup: (stock_id, date, data_type) -> id
+                        existing_records_map = {
+                            (rec['stock_id'], rec['date'], rec['data_type']): rec['id']
+                            for rec in existing_records
+                        }
+
+                        # 2. Separate into lists for creation and update
+                        records_to_create = []
+                        records_to_update = []
+
+                        for data_point in data_to_process:
+                            stock_id = data_point['stock'].id
+                            date_val = data_point['date']
+                            data_type_val = data_point['data_type']
+
+                            key = (stock_id, date_val, data_type_val)
+
+                            if key in existing_records_map:
+                                record_id = existing_records_map[key]
+                                records_to_update.append(
+                                    StockData(
+                                        id=record_id,
+                                        **data_point  # Pass all fields including stock, date, data_type, and value
+                                    )
+                                )
+                            else:
+                                records_to_create.append(StockData(**data_point))
+
+                        # 3. Perform bulk operations
+                        if records_to_create:
+                            StockData.objects.bulk_create(records_to_create, batch_size=5000)
+
+                        if records_to_update:
+                            # Only update the 'value' field
+                            StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
+
+                        print(
+                            f"Successfully imported {len(records_to_create)} new and updated {len(records_to_update)} stock return records from XLSX.")
 
                 elif file_path.endswith('.csv'):
+                    import time  # <-- add this if not already imported at top
+
+                    t0 = time.time()
+                    df = pd.read_csv(file_path, header=None, low_memory=False)
+                    print(f"✅ Loaded CSV in {time.time() - t0:.2f} seconds (shape={df.shape})")
                     df = pd.read_csv(file_path, header=None)
                     # Determine data_type based on filename
                     if 'prices' in file_obj.name.lower():
                         data_type = 'price'
-                    elif 'returns' or 'mxus_data' in file_obj.name.lower():
+
+                    elif 'returns' in file_obj.name.lower() or 'mxus_data' in file_obj.name.lower():
                         data_type = 'return'
-                    elif 'bql_query' or 'equity' in file_obj.name.lower():
+
+                    elif 'bql_query' in file_obj.name.lower() or 'equity' in file_obj.name.lower():
                         data_type = 'equity'
+
                     else:
                         raise ValueError("Could not determine data type from CSV filename.")
 
+                    t1 = time.time()
                     process_data(df, file_obj, data_type, upload_record)
-
+                    print(f"✅ process_data() took {time.time() - t1:.2f} seconds")
                 else:
                     raise ValueError("Unsupported file format.")
 
+
                 return Response({'message': 'File uploaded and processed successfully.'},
-                                status=status.HTTP_201_CREATED)
+                                    status=status.HTTP_201_CREATED)
 
             except Exception as e:
                 # Cleanup if processing fails
