@@ -529,117 +529,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
               </div>
             </div>
 
-            {/* Advanced Fund Manager Configuration */}
-            <div className="border-t pt-4">
-              <h4 className="font-medium mb-4 text-sm text-gray-700">Advanced Configuration for Fund Managers</h4>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="riskTolerance">Risk Tolerance</Label>
-                  <Select 
-                    value={modelConfig.riskTolerance} 
-                    onValueChange={(value) => setModelConfig(prev => ({...prev, riskTolerance: value}))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select risk level" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Conservative (Low Risk)</SelectItem>
-                      <SelectItem value="medium">Balanced (Medium Risk)</SelectItem>
-                      <SelectItem value="high">Aggressive (High Risk)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="minimumConfidence">Minimum Confidence</Label>
-                  <Select 
-                    value={modelConfig.minimumConfidence} 
-                    onValueChange={(value) => setModelConfig(prev => ({...prev, minimumConfidence: value}))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select confidence" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0.5">50% (Include more signals)</SelectItem>
-                      <SelectItem value="0.6">60% (Balanced)</SelectItem>
-                      <SelectItem value="0.7">70% (High quality)</SelectItem>
-                      <SelectItem value="0.8">80% (Very selective)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label htmlFor="lookbackPeriod">Lookback Period</Label>
-                  <Select 
-                    value={modelConfig.lookbackPeriod} 
-                    onValueChange={(value) => setModelConfig(prev => ({...prev, lookbackPeriod: value}))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select period" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="30">30 Days (Short-term)</SelectItem>
-                      <SelectItem value="60">60 Days (Standard)</SelectItem>
-                      <SelectItem value="90">90 Days (Medium-term)</SelectItem>
-                      <SelectItem value="120">120 Days (Long-term)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div>
-                  <Label htmlFor="sectorFilter">Sector Filter</Label>
-                  <Select 
-                    value={modelConfig.sectorFilter} 
-                    onValueChange={(value) => setModelConfig(prev => ({...prev, sectorFilter: value}))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select sector" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Sectors</SelectItem>
-                      <SelectItem value="technology">Technology</SelectItem>
-                      <SelectItem value="financials">Financials</SelectItem>
-                      <SelectItem value="healthcare">Healthcare</SelectItem>
-                      <SelectItem value="consumer">Consumer Discretionary</SelectItem>
-                      <SelectItem value="industrials">Industrials</SelectItem>
-                      <SelectItem value="energy">Energy</SelectItem>
-                      <SelectItem value="utilities">Utilities</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="volatilityAdjustment"
-                      checked={modelConfig.volatilityAdjustment === 'true'}
-                      onChange={(e) => setModelConfig(prev => ({...prev, volatilityAdjustment: e.target.checked ? 'true' : 'false'}))}
-                      className="rounded border-gray-300"
-                    />
-                    <Label htmlFor="volatilityAdjustment" className="text-sm">
-                      Volatility Adjustment
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="crossSectionalRanking"
-                      checked={modelConfig.crossSectionalRanking === 'true'}
-                      onChange={(e) => setModelConfig(prev => ({...prev, crossSectionalRanking: e.target.checked ? 'true' : 'false'}))}
-                      className="rounded border-gray-300"
-                    />
-                    <Label htmlFor="crossSectionalRanking" className="text-sm">
-                      Cross-Sectional Ranking
-                    </Label>
-                  </div>
-                </div>
-              </div>
-
               {/* Advanced Model Training Parameters */}
+
               <div className="border-t pt-4 mt-4">
                 <h5 className="font-medium mb-4 text-sm text-gray-700">Advanced Model Training Parameters</h5>
                 
@@ -748,7 +639,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                   <p>• Multi-Period: {modelConfig.multiPeriod}</p>
                 </div>
               </div>
-            </div>
+
             
             <Button 
               onClick={runModel} 

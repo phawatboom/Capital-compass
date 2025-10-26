@@ -16,7 +16,7 @@ function BetaAnalysisPlatformContent() {
           Configure and run beta analysis on your data
         </p>
       </div>
-      
+
       <IntegratedWorkflow fileId={fileId ? parseInt(fileId, 10) : undefined} />
     </div>
   );

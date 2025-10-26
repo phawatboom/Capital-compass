@@ -1,13 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { BetaSummaryTable } from '@/components/beta/BetaSummaryTable';
-import { BetaTimeSeriesChart } from '@/components/beta/BetaTimeSeriesChart';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import React, { useState, useEffect } from "react";
+import { BetaSummaryTable } from "@/components/beta/BetaSummaryTable";
+import { BetaTimeSeriesChart } from "@/components/beta/BetaTimeSeriesChart";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Download, RefreshCw } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+
+/** API base URL - adjust based on your backend configuration */
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface BetaSummary {
   ticker: string;
@@ -31,35 +39,48 @@ interface BetaTimeSeriesData {
   }>;
 }
 
+/** Shared stats shape: known scalars plus "coef_*" entries */
+type SharedStats = {
+  r2_global?: number;
+  volatility_coeff?: number;
+  y_intercept?: number;
+  /** All factor coefficients look like "coef_<name>" */
+  [key: `coef_${string}`]: number | null | undefined;
+};
+
+/** Type guard to narrow unknown → number */
+const isFiniteNumber = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v);
+
 export function BetaDashboard() {
   const [summaryData, setSummaryData] = useState<BetaSummary[]>([]);
   const [timeSeriesData, setTimeSeriesData] = useState<BetaTimeSeriesData | null>(null);
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
+  const [selectedTicker, setSelectedTicker] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [timeSeriesLoading, setTimeSeriesLoading] = useState(false);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<string>("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [sharedStats, setSharedStats] = useState<any | null>(null);
+  const [sharedStats, setSharedStats] = useState<SharedStats | null>(null);
 
+  /** Load shared/global factor stats */
   useEffect(() => {
-      fetch(`${API_BASE}/api/factors/shared/`)
-        .then(res => res.json())
-        .then(setSharedStats)
-        .catch(() => {});
-    }, []);
-
-  // API base URL - adjust based on your backend configuration
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    fetch(`${API_BASE}/api/factors/shared/`)
+      .then((res) => res.json())
+      .then(setSharedStats)
+      .catch(() => {
+        /* silently ignore */
+      });
+  }, []);
 
   const fetchSummaryData = async () => {
     setLoading(true);
-    setError('');
+    setError("");
 
     try {
       const response = await fetch(`${API_BASE}/api/factors/summary/`, {
-        credentials: 'include',
+        credentials: "include",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
       });
 
@@ -71,8 +92,8 @@ export function BetaDashboard() {
       setSummaryData(data.summary || []);
       setLastUpdated(new Date());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch summary data');
-      console.error('Error fetching summary data:', err);
+      setError(err instanceof Error ? err.message : "Failed to fetch summary data");
+      console.error("Error fetching summary data:", err);
     } finally {
       setLoading(false);
     }
@@ -85,9 +106,9 @@ export function BetaDashboard() {
 
     try {
       const response = await fetch(`${API_BASE}/api/beta/timeseries/${ticker}/`, {
-        credentials: 'include',
+        credentials: "include",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
       });
 
@@ -96,10 +117,10 @@ export function BetaDashboard() {
       }
 
       const data = await response.json();
-      setTimeSeriesData(data);
+      setTimeSeriesData(data as BetaTimeSeriesData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch time series data');
-      console.error('Error fetching time series data:', err);
+      setError(err instanceof Error ? err.message : "Failed to fetch time series data");
+      console.error("Error fetching time series data:", err);
     } finally {
       setTimeSeriesLoading(false);
     }
@@ -108,38 +129,6 @@ export function BetaDashboard() {
   const handleTickerSelect = (ticker: string) => {
     setSelectedTicker(ticker);
     fetchTimeSeriesData(ticker);
-  };
-
-  const handleImportData = async () => {
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${API_BASE}/api/beta/import/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to import data: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-
-      // Refresh summary data after import
-      await fetchSummaryData();
-
-      // Show success message (you might want to use a toast notification here)
-      console.log('Import successful:', result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import data');
-      console.error('Error importing data:', err);
-    } finally {
-      setLoading(false);
-    }
   };
 
   // Load summary data on component mount
@@ -171,104 +160,105 @@ export function BetaDashboard() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-        {/* Global Factor Stats Cards */}
-        {sharedStats && (
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            {/* Global R² */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Global R² Score</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {sharedStats.r2_global?.toFixed(4) ?? "N/A"}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Model fit quality across all tickers
-                </p>
-              </CardContent>
-            </Card>
 
-            {/* Volatility Coefficient */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Volatility Coefficient</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {sharedStats.volatility_coeff?.toFixed(4) ?? "N/A"}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  ElasticNet intercept term for volatility
-                </p>
-              </CardContent>
-            </Card>
+      {/* Global Factor Stats Cards */}
+      {sharedStats && (
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          {/* Global R² */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Global R² Score</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {sharedStats.r2_global?.toFixed(4) ?? "N/A"}
+              </div>
+              <p className="text-xs text-muted-foreground">Model fit quality across all tickers</p>
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {sharedStats.y_intercept?.toFixed(32) ?? "N/A"}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Model baseline term (average intercept across all tickers)
-                </p>
-              </CardContent>
-            </Card>
+          {/* Volatility Coefficient */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Volatility Coefficient</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {sharedStats.volatility_coeff?.toFixed(4) ?? "N/A"}
+              </div>
+              <p className="text-xs text-muted-foreground">ElasticNet intercept term for volatility</p>
+            </CardContent>
+          </Card>
 
-            {/* Strongest Positive Coefficient */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Top Positive Factor</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {(() => {
-                  const coefs = Object.entries(sharedStats)
-                    .filter(([k]) => k.startsWith("coef_") && sharedStats[k] !== null)
-                    .sort((a, b) => b[1] - a[1]);
-                  const top = coefs[0];
-                  return top ? (
-                    <>
-                      <div className="text-2xl font-bold">{top[0].replace("coef_", "")}</div>
-                      <p className="text-xs text-muted-foreground">
-                        Weight: {top[1].toFixed(4)}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="text-sm text-gray-500">N/A</div>
-                  );
-                })()}
-              </CardContent>
-            </Card>
+          {/* Y-Intercept */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {sharedStats.y_intercept?.toFixed(32) ?? "N/A"}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Model baseline term (average intercept across all tickers)
+              </p>
+            </CardContent>
+          </Card>
 
-            {/* Strongest Negative Coefficient */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Top Negative Factor</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {(() => {
-                  const coefs = Object.entries(sharedStats)
-                    .filter(([k]) => k.startsWith("coef_") && sharedStats[k] !== null)
-                    .sort((a, b) => a[1] - b[1]);
-                  const bottom = coefs[0];
-                  return bottom ? (
-                    <>
-                      <div className="text-2xl font-bold">{bottom[0].replace("coef_", "")}</div>
-                      <p className="text-xs text-muted-foreground">
-                        Weight: {bottom[1].toFixed(4)}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="text-sm text-gray-500">N/A</div>
-                  );
-                })()}
-              </CardContent>
-            </Card>
-          </div>
-        )}
+          {/* Strongest Positive Coefficient */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Top Positive Factor</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const coefEntries = Object.entries(sharedStats ?? {}).filter(
+                  (e): e is [string, number] => e[0].startsWith("coef_") && isFiniteNumber(e[1])
+                );
+
+                if (coefEntries.length === 0) {
+                  return <div className="text-sm text-gray-500">N/A</div>;
+                }
+
+                const top = [...coefEntries].sort((a, b) => b[1] - a[1])[0];
+                return (
+                  <>
+                    <div className="text-2xl font-bold">{top[0].replace("coef_", "")}</div>
+                    <p className="text-xs text-muted-foreground">Weight: {top[1].toFixed(4)}</p>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Strongest Negative Coefficient */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Top Negative Factor</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const coefEntries = Object.entries(sharedStats ?? {}).filter(
+                  (e): e is [string, number] => e[0].startsWith("coef_") && isFiniteNumber(e[1])
+                );
+
+                if (coefEntries.length === 0) {
+                  return <div className="text-sm text-gray-500">N/A</div>;
+                }
+
+                const bottom = [...coefEntries].sort((a, b) => a[1] - b[1])[0];
+                return (
+                  <>
+                    <div className="text-2xl font-bold">{bottom[0].replace("coef_", "")}</div>
+                    <p className="text-xs text-muted-foreground">Weight: {bottom[1].toFixed(4)}</p>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Main Content */}
       <Tabs defaultValue="summary" className="space-y-4">
         <TabsList>
@@ -288,10 +278,7 @@ export function BetaDashboard() {
 
         <TabsContent value="timeseries" className="space-y-4">
           {selectedTicker ? (
-            <BetaTimeSeriesChart
-              data={timeSeriesData}
-              loading={timeSeriesLoading}
-            />
+            <BetaTimeSeriesChart data={timeSeriesData} loading={timeSeriesLoading} />
           ) : (
             <Card>
               <CardHeader>
