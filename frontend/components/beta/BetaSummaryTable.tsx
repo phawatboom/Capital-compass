@@ -87,7 +87,9 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
   const [sortField, setSortField] = useState<SortableField>('latest_date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+
+  // NEW: rows per page selector (20 default; 50, 100, All available)
+  const [rowsPerPage, setRowsPerPage] = useState<number | 'all'>(20);
 
   // Recompute filtered + sorted data whenever inputs change
   useEffect(() => {
@@ -131,12 +133,21 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
     setCurrentPage(1); // reset paging when filters/sort change
   }, [data, searchTicker, confidenceFilter, sortField, sortOrder]);
 
+  // Reset to first page whenever rowsPerPage changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [rowsPerPage]);
+
   // Current page slice
   const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    const end = currentPage * itemsPerPage;
+    if (rowsPerPage === 'all') return filteredData;
+    const start = (currentPage - 1) * rowsPerPage;
+    const end = currentPage * rowsPerPage;
     return filteredData.slice(start, end);
-  }, [filteredData, currentPage]);
+  }, [filteredData, currentPage, rowsPerPage]);
+
+  const totalPages =
+    rowsPerPage === 'all' ? 1 : Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
 
   const handleSort = (field: SortableField) => {
     if (sortField === field) {
@@ -179,9 +190,9 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
       </CardHeader>
 
       <CardContent>
-        Filters
-        <div className="flex gap-4 mb-6">
-          <div className="flex-1">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-4 mb-6">
+          <div className="flex-1 min-w-[220px]">
             <Input
               placeholder="Search ticker..."
               value={searchTicker}
@@ -189,6 +200,8 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
               className="max-w-sm"
             />
           </div>
+
+          {/* Example (kept commented) confidence filter */}
           {/* <Select value={confidenceFilter} onValueChange={setConfidenceFilter}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Confidence Level" />
@@ -200,11 +213,31 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
               <SelectItem value="Low">Low Confidence</SelectItem>
             </SelectContent>
           </Select> */}
+
+          {/* NEW: Rows per page selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">Rows:</span>
+            <Select
+              value={rowsPerPage === 'all' ? 'all' : String(rowsPerPage)}
+              onValueChange={(v) => setRowsPerPage(v === 'all' ? 'all' : Number(v))}
+            >
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Rows" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="20">20</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+                <SelectItem value="all">All</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Results Summary */}
         <div className="mb-4 text-sm text-gray-600">
-          Showing {filteredData.length} of {data.length} stocks
+          Showing {rowsPerPage === 'all' ? filteredData.length : paginatedData.length} of {filteredData.length} filtered stocks
+          {filteredData.length !== data.length ? ` (from ${data.length} total)` : ''}
         </div>
 
         {/* Table */}
@@ -212,7 +245,10 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead onClick={() => handleSort('ticker')} className="cursor-pointer hover:bg-gray-50">
+                <TableHead
+                  onClick={() => handleSort('ticker')}
+                  className="sticky left-0 z-30 bg-background cursor-pointer hover:bg-gray-50 w-36 min-w-[9rem] border-r"
+                >
                   Ticker {sortField === 'ticker' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
 
@@ -299,29 +335,26 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                 </TableHead>
 
                 <TableHead onClick={() => handleSort('xsec_disp_1d')} className="cursor-pointer hover:bg-gray-50">
-                  XSec 1d {sortField === 'xsec_1d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  XSec 1d {sortField === 'xsec_disp_1d' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
                 <TableHead onClick={() => handleSort('xsec_disp_30d')} className="cursor-pointer hover:bg-gray-50">
-                  XSec 30d {sortField === 'xsec_30d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  XSec 30d {sortField === 'xsec_disp_30d' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
                 <TableHead onClick={() => handleSort('horizon_days')} className="cursor-pointer hover:bg-gray-50">
-                  Horizon {sortField === 'horizon' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  Horizon (d) {sortField === 'horizon_days' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
 
-                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               {paginatedData.map((item) => (
                 <TableRow key={item.ticker}>
-                  
-                  <TableCell className="font-medium">
+                  <TableCell className="sticky left-0 z-20 bg-background w-36 min-w-[9rem] border-r">
                     <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
                       {item.ticker}
                     </Button>
-                
-                    </TableCell>
+                  </TableCell>
 
                   <TableCell>
                     {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
@@ -369,24 +402,14 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                   <TableCell className="font-mono">{formatNumber(item.xsec_disp_1d)}</TableCell>
                   <TableCell className="font-mono">{formatNumber(item.xsec_disp_30d)}</TableCell>
                   <TableCell className="font-mono">{item.horizon_days ?? '—'}</TableCell>
-
-                  <TableCell>
-                    <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
-                      Details
-                    </Button>
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
 
-        {filteredData.length === 0 && (
-          <div className="text-center py-8 text-gray-500">No data available for the selected filters.</div>
-        )}
-
         {/* Pagination Controls */}
-        {filteredData.length > itemsPerPage && (
+        {rowsPerPage !== 'all' && filteredData.length > rowsPerPage && (
           <div className="flex justify-center items-center gap-3 mt-4">
             <Button
               variant="outline"
@@ -398,16 +421,14 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
             </Button>
 
             <span className="text-sm text-gray-600">
-              Page {currentPage} of {Math.ceil(filteredData.length / itemsPerPage)}
+              Page {currentPage} of {totalPages}
             </span>
 
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                setCurrentPage((p) => Math.min(p + 1, Math.ceil(filteredData.length / itemsPerPage)))
-              }
-              disabled={currentPage === Math.ceil(filteredData.length / itemsPerPage)}
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={currentPage === totalPages}
             >
               Next
             </Button>
