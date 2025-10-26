@@ -1,22 +1,50 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import React, { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { UniversalBetaDashboard } from '@/components/beta/UniversalBetaDashboard';
-import { IntegratedWorkflow } from '@/components/beta/IntegratedWorkflow';
+import { UniversalBetaDashboard } from "@/components/beta/UniversalBetaDashboard";
+import { IntegratedWorkflow } from "@/components/beta/IntegratedWorkflow";
 import { Upload, BarChart3, Database, Zap } from "lucide-react";
 
+/** ---- Suspense wrapper (required for useSearchParams) ---- */
 export default function CompleteBetaAnalysisPage() {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <CompleteBetaAnalysisPageInner />
+    </Suspense>
+  );
+}
+
+function PageFallback() {
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <Card>
+        <CardHeader>
+          <CardTitle>Loading Universal Beta Forecasting Platform…</CardTitle>
+          <CardDescription>Preparing dashboard and reading URL parameters</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-24 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** ---- Actual page content (uses useSearchParams under Suspense) ---- */
+function CompleteBetaAnalysisPageInner() {
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState("overview");
   const [clientResultsReady, setClientResultsReady] = useState<string | null>(null);
 
   // Get parameters from URL
-  const tabParam = searchParams.get('tab');
-  const fileIdParam = searchParams.get('fileId');
+  const tabParam = searchParams.get("tab");
+  const fileIdParam = searchParams.get("fileId");
 
   useEffect(() => {
     // If tab parameter is provided, set it as active
@@ -24,22 +52,20 @@ export default function CompleteBetaAnalysisPage() {
       setActiveTab(tabParam);
     } else if (fileIdParam) {
       // If fileId is provided (coming from My Data analyze), go directly to upload tab
-      setActiveTab('upload');
+      setActiveTab("upload");
     }
   }, [tabParam, fileIdParam]);
 
   const handleResultsReady = (clientId: string) => {
     setClientResultsReady(clientId);
-    setActiveTab('dashboard');
+    setActiveTab("dashboard");
   };
 
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">
-          Universal Beta Forecasting Platform
-        </h1>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">Universal Beta Forecasting Platform</h1>
         <p className="text-muted-foreground">
           Complete solution for beta coefficient prediction - use pre-trained models or analyze your own data
         </p>
@@ -75,9 +101,7 @@ export default function CompleteBetaAnalysisPage() {
                   <Upload className="h-5 w-5 text-blue-600" />
                   Custom Data Analysis
                 </CardTitle>
-                <CardDescription>
-                  Upload your own stock data and run the universal beta model
-                </CardDescription>
+                <CardDescription>Upload your own stock data and run the universal beta model</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -99,7 +123,7 @@ export default function CompleteBetaAnalysisPage() {
                     </Badge>
                   </div>
                   <button
-                    onClick={() => setActiveTab('upload')}
+                    onClick={() => setActiveTab("upload")}
                     className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors"
                   >
                     Start Custom Analysis
@@ -115,9 +139,7 @@ export default function CompleteBetaAnalysisPage() {
                   <BarChart3 className="h-5 w-5 text-green-600" />
                   Pre-trained Models
                 </CardTitle>
-                <CardDescription>
-                  Explore results from our universal model trained on 518 stocks
-                </CardDescription>
+                <CardDescription>Explore results from our universal model trained on 518 stocks</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -139,7 +161,7 @@ export default function CompleteBetaAnalysisPage() {
                     </Badge>
                   </div>
                   <button
-                    onClick={() => setActiveTab('dashboard')}
+                    onClick={() => setActiveTab("dashboard")}
                     className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
                   >
                     View Live Dashboard
@@ -153,9 +175,7 @@ export default function CompleteBetaAnalysisPage() {
           <Card>
             <CardHeader>
               <CardTitle>Platform Capabilities</CardTitle>
-              <CardDescription>
-                Comprehensive beta forecasting with universal cross-sectional learning
-              </CardDescription>
+              <CardDescription>Comprehensive beta forecasting with universal cross-sectional learning</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid md:grid-cols-3 gap-6">
@@ -193,8 +213,8 @@ export default function CompleteBetaAnalysisPage() {
 
         {/* Upload & Analyze Tab */}
         <TabsContent value="upload" className="space-y-6">
-          <IntegratedWorkflow 
-            onResultsReady={handleResultsReady} 
+          <IntegratedWorkflow
+            onResultsReady={handleResultsReady}
             fileId={fileIdParam ? parseInt(fileIdParam, 10) : undefined}
           />
         </TabsContent>
@@ -208,9 +228,7 @@ export default function CompleteBetaAnalysisPage() {
                   <Badge variant="default" className="bg-blue-600">
                     Custom Analysis
                   </Badge>
-                  <span className="text-sm text-blue-700">
-                    Showing results for client: {clientResultsReady}
-                  </span>
+                  <span className="text-sm text-blue-700">Showing results for client: {clientResultsReady}</span>
                 </div>
               </CardContent>
             </Card>
@@ -234,20 +252,8 @@ export default function CompleteBetaAnalysisPage() {
                     <h3 className="font-semibold text-lg">518</h3>
                     <p className="text-sm text-gray-600">Unique stocks in universe</p>
                   </div>
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-semibold text-lg">60K+</h3>
-                    <p className="text-sm text-gray-600">Out-of-sample predictions</p>
-                  </div>
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-semibold text-lg">58.4%</h3>
-                    <p className="text-sm text-gray-600">Directional accuracy (10d)</p>
-                  </div>
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-semibold text-lg">23+</h3>
-                    <p className="text-sm text-gray-600">Engineered features</p>
-                  </div>
                 </div>
-                
+
                 <div className="space-y-3">
                   <h4 className="font-medium">Model Features:</h4>
                   <div className="grid md:grid-cols-2 gap-4 text-sm">
@@ -273,7 +279,7 @@ export default function CompleteBetaAnalysisPage() {
                 </div>
 
                 <button
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={() => setActiveTab("dashboard")}
                   className="w-full bg-green-600 text-white py-3 px-4 rounded-md hover:bg-green-700 transition-colors"
                 >
                   Explore Pre-trained Models
