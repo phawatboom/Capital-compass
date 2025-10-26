@@ -225,65 +225,87 @@ export default function UploadPage() {
 
           {/* Requirements Section */}
           <Card>
-            <CardHeader>
-              <CardTitle>File Requirements</CardTitle>
-              <CardDescription>Ensure your data meets these requirements for optimal analysis</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-start space-x-3">
-                <FileSpreadsheet className="h-5 w-5 text-blue-600 mt-0.5" />
-                <div>
-                  <h3 className="font-medium">File Format</h3>
-                  <p className="text-sm text-gray-600">CSV only (.csv) with UTF-8 encoding</p>
-                </div>
-              </div>
+              <CardHeader>
+                <CardTitle>File Requirements</CardTitle>
+                <CardDescription>
+                  Ensure your uploaded Excel file follows these requirements for successful analysis.
+                </CardDescription>
+              </CardHeader>
 
-              <div className="flex items-start space-x-3">
-                <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                <div>
-                  <h3 className="font-medium">Required Headers</h3>
-                  <p className="text-sm text-gray-600">
-                    <span className="font-medium">Note:</span> Your current backend expects a wide CSV with a
-                    header row of stock names (after skipping the first 3 lines), not the long format shown
-                    below. We can add long‑format support later if you want.
+              <CardContent className="space-y-4">
+                {/* File Format */}
+                <div className="flex items-start space-x-3">
+                  <FileSpreadsheet className="h-5 w-5 text-blue-600 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium">File Format</h3>
+                    <p className="text-sm text-gray-600">
+                       <strong>Excel only</strong> — <code>.xlsx</code> format (no <code>.csv</code> support yet)
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      The file must contain a sheet named <code>Returns</code>, which includes daily percentage or
+                      decimal returns for each stock.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Expected Structure */}
+                <div className="flex items-start space-x-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium">Expected Structure</h3>
+                    <p className="text-sm text-gray-600">
+                      The backend expects a <strong>wide-format Excel sheet</strong> where:
+                    </p>
+                    <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 mt-1">
+                      <li>The first column is <code>Date</code></li>
+                      <li>All other columns are ticker symbols (e.g. <code>AAPL</code>, <code>MSFT</code>, <code>GOOG</code>)</li>
+                      <li>Each cell contains the daily return for that ticker on that date</li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Data Requirements */}
+                <div className="flex items-start space-x-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium">Data Requirements</h3>
+                    <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 mt-1">
+                      <li>Dates must be valid and parseable (e.g. <code>2020-01-02</code> or <code>30-Jul-2010</code>)</li>
+                      <li>Returns may be in decimals (e.g. <code>0.0123</code>) or percentages (e.g. <code>1.23%</code>) — both are supported</li>
+                      <li>No empty rows or columns</li>
+                      <li>Consistent ticker naming across all columns</li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* File Size */}
+                <div className="flex items-start space-x-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium">File Size</h3>
+                    <p className="text-sm text-gray-600">
+                      Maximum <strong>200 MB</strong> per file
+                    </p>
+                  </div>
+                </div>
+
+                {/* Example Table */}
+                <div className="bg-blue-50 p-4 rounded-lg mt-6">
+                  <h3 className="font-medium text-blue-900 mb-2">Sample (wide format)</h3>
+                  <div className="text-xs font-mono bg-white p-2 rounded border overflow-x-auto">
+                    <div>Date,AAPL,MSFT,GOOG,AMZN</div>
+                    <div>2020-01-02,0.0123,0.0091,-0.0045,0.0150</div>
+                    <div>2020-01-03,-0.0056,0.0023,0.0082,-0.0011</div>
+                    <div>2020-01-06,0.0078,-0.0031,0.0114,0.0042</div>
+                    <div>...</div>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-2">
+                    This is the required <strong>wide-format</strong> layout. Long-format support (date, ticker, return)
+                    may be added in a future update.
                   </p>
                 </div>
-              </div>
-
-              <div className="flex items-start space-x-3">
-                <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                <div>
-                  <h3 className="font-medium">Data Requirements</h3>
-                  <p className="text-sm text-gray-600">
-                    No empty rows; dates parseable by backend (e.g., <code>%d-%b-%Y</code> like 30-Jul-2010).
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start space-x-3">
-                <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                <div>
-                  <h3 className="font-medium">File Size</h3>
-                  <p className="text-sm text-gray-600">Maximum 20MB per file</p>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-4 rounded-lg mt-6">
-                <h3 className="font-medium text-blue-900 mb-2">Sample (long format)</h3>
-                <div className="text-xs font-mono bg-white p-2 rounded border">
-                  <div>date,ticker,adj_close</div>
-                  <div>2025-08-01,AAPL,150.25</div>
-                  <div>2025-08-02,AAPL,151.10</div>
-                  <div>2025-08-01,MSFT,375.80</div>
-                  <div>2025-08-02,MSFT,378.20</div>
-                  <div>...</div>
-                </div>
-                <p className="text-xs text-gray-600 mt-2">
-                  Your current backend expects a wide format (multiple stock columns). We can support both.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>
