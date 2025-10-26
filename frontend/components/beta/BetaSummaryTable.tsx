@@ -315,7 +315,13 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
             <TableBody>
               {paginatedData.map((item) => (
                 <TableRow key={item.ticker}>
-                  <TableCell className="font-medium">{item.ticker}</TableCell>
+                  
+                  <TableCell className="font-medium">
+                    <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
+                      {item.ticker}
+                    </Button>
+                
+                    </TableCell>
 
                   <TableCell>
                     {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
