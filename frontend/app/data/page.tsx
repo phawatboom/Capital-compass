@@ -183,10 +183,10 @@ function UploadsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState(
-    searchParams?.get("tab") || "datasets"
-  );
+  // // Tab state
+  // const [activeTab, setActiveTab] = useState(
+  //   searchParams?.get("tab") || "datasets"
+  // );
 
   // Analysis Results State
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
@@ -529,7 +529,7 @@ function UploadsPageInner() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">My Data</h1>
             <p className="text-gray-600 text-sm mt-1">
-              View and manage your uploaded data files
+              Manage your uploaded data files
             </p>
           </div>
           <Link href="/upload">
@@ -553,7 +553,7 @@ function UploadsPageInner() {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="datasets" className="flex items-center gap-2">
@@ -564,12 +564,12 @@ function UploadsPageInner() {
             <BarChart3 className="h-4 w-4" />
             Analysis Results
           </TabsTrigger>
-        </TabsList>
+        </TabsList> */}
 
         {/* Datasets Tab */}
-        <TabsContent value="datasets" className="space-y-6">
+        {/* <TabsContent value="datasets" className="space-y-6"> */}
           {/* Filters bar */}
-          <div className="bg-white border rounded-lg p-4 shadow-sm mb-3 w-full">
+          <div className="bg-white border rounded-lg p-4 shadow-sm mb-5 w-full">
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex-1 min-w-[220px]">
                 <label className="text-xs text-gray-500">Search</label>
@@ -1034,341 +1034,177 @@ function UploadsPageInner() {
               </div>
             </div>
           )}
-        </TabsContent>
+        {/* </TabsContent> */}
 
         {/* Analysis Results Tab */}
-        <TabsContent value="analysis" className="space-y-6">
-          {analysisLoading ? (
-            <div className="flex h-64 items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-            </div>
-          ) : analysisResults.length === 0 ? (
-            <div className="space-y-6">
-              {/* Empty state with call to action */}
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <BarChart3 className="h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    No Analysis Results
-                  </h3>
-                  <p className="text-gray-600 text-center mb-4">
-                    Run an analysis on your datasets to see comprehensive results here.
-                  </p>
-                  <p className="text-sm text-gray-500 mb-4 text-center">
-                    Go to the Datasets tab and click "Analyze" on any uploaded file
-                  </p>
-                  <Button onClick={() => setActiveTab("datasets")} className="mb-6">
-                    Go to Datasets
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* Demo preview */}
-              <div className="border-t pt-6">
-                <div className="mb-6">
-                  <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                    Preview: Your Analysis Results Will Look Like This
-                  </h3>
-                  <p className="text-gray-600">
-                    This demonstrates the comprehensive insights you'll get from our
-                    Universal Beta Forecasting Platform
-                  </p>
-                </div>
-
-                {/* Core Performance Metrics */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-                  <Card className="opacity-75 border-dashed border-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Mean Absolute Error
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-muted-foreground">0.0342</div>
-                      <p className="text-xs text-muted-foreground">Prediction accuracy</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="opacity-75 border-dashed border-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        RMSE
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-muted-foreground">0.0487</div>
-                      <p className="text-xs text-muted-foreground">Root mean square error</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="opacity-75 border-dashed border-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        R² Score
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-muted-foreground">0.7834</div>
-                      <p className="text-xs text-muted-foreground">Model fit quality</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="opacity-75 border-dashed border-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Directional Accuracy
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-muted-foreground">67.8%</div>
-                      <p className="text-xs text-muted-foreground">Direction prediction</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="opacity-75 border-dashed border-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Sample Size
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-muted-foreground">15,420</div>
-                      <p className="text-xs text-muted-foreground">Data points analyzed</p>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Charts & explanations trimmed for brevity, unchanged */}
-                {/* ... */}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Analysis Selection */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Analysis Results</CardTitle>
-                  <CardDescription>
-                    Select an analysis run to view detailed results
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Select
-                    value={selectedAnalysis?.toString() || ""}
-                    onValueChange={(value) =>
-                      setSelectedAnalysis(value ? parseInt(value) : null)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select an analysis run..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {analysisResults.map((result) => (
-                        <SelectItem key={result.id} value={result.id.toString()}>
-                          <div className="flex items-center justify-between w-full">
-                            <span>{result.run_name}</span>
-                            <Badge variant={getStatusBadgeVariant(result.status)}>
-                              {result.status}
-                            </Badge>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </CardContent>
-              </Card>
-
-              {/* Selected Analysis Dashboard */}
-              {selectedAnalysis && (
-                <AnalysisDashboard
-                  analysis={analysisResults.find((r) => r.id === selectedAnalysis)!}
-                />
-              )}
-
-              {/* Live Dashboard */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Live Dashboard</CardTitle>
-                  <CardDescription>
-                    Real-time overview of your analysis performance
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <LiveDashboard refreshTrigger={0} />
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }
 
 /* --------------------------- Analysis Dashboard -------------------------- */
 
-const AnalysisDashboard = ({ analysis }: { analysis: AnalysisResult }) => {
-  const performanceData = [
-    { name: "MAE", value: analysis.mae || 0, color: "#ef4444" },
-    { name: "RMSE", value: analysis.rmse || 0, color: "#f97316" },
-    { name: "R²", value: analysis.r2_global || 0, color: "#22c55e" },
-    { name: "Dir. Acc.", value: analysis.directional_accuracy || 0, color: "#3b82f6" },
-  ];
+// const AnalysisDashboard = ({ analysis }: { analysis: AnalysisResult }) => {
+//   const performanceData = [
+//     { name: "MAE", value: analysis.mae || 0, color: "#ef4444" },
+//     { name: "RMSE", value: analysis.rmse || 0, color: "#f97316" },
+//     { name: "R²", value: analysis.r2_global || 0, color: "#22c55e" },
+//     { name: "Dir. Acc.", value: analysis.directional_accuracy || 0, color: "#3b82f6" },
+//   ];
 
-  const getQualityIndicator = (metric: string, value: number) => {
-    switch (metric) {
-      case "r2":
-        return value > 0.1 ? "High" : value > 0.05 ? "Medium" : "Low";
-      case "directional_accuracy":
-        return value > 0.55 ? "Good" : value > 0.5 ? "Fair" : "Poor";
-      case "sample_size":
-        return value > 1000 ? "Sufficient" : "Limited";
-      default:
-        return "N/A";
-    }
-  };
+//   const getQualityIndicator = (metric: string, value: number) => {
+//     switch (metric) {
+//       case "r2":
+//         return value > 0.1 ? "High" : value > 0.05 ? "Medium" : "Low";
+//       case "directional_accuracy":
+//         return value > 0.55 ? "Good" : value > 0.5 ? "Fair" : "Poor";
+//       case "sample_size":
+//         return value > 1000 ? "Sufficient" : "Limited";
+//       default:
+//         return "N/A";
+//     }
+//   };
 
-  const modelSignificance = getQualityIndicator("r2", analysis.r2_global || 0);
-  const predictionAccuracy = getQualityIndicator(
-    "directional_accuracy",
-    analysis.directional_accuracy || 0
-  );
-  const sampleAdequacy = getQualityIndicator("sample_size", analysis.sample_size || 0);
+//   const modelSignificance = getQualityIndicator("r2", analysis.r2_global || 0);
+//   const predictionAccuracy = getQualityIndicator(
+//     "directional_accuracy",
+//     analysis.directional_accuracy || 0
+//   );
+//   const sampleAdequacy = getQualityIndicator("sample_size", analysis.sample_size || 0);
 
-  return (
-    <div className="grid gap-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Mean Absolute Error</CardTitle>
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{(analysis.mae || 0).toFixed(4)}</div>
-            <p className="text-xs text-muted-foreground">Lower is better</p>
-            <div className="flex items-center mt-1">
-              <div
-                className={`w-2 h-2 rounded-full mr-2 ${
-                  (analysis.mae || 0) < 0.05
-                    ? "bg-green-500"
-                    : (analysis.mae || 0) < 0.1
-                    ? "bg-yellow-500"
-                    : "bg-red-500"
-                }`}
-              />
-              <span className="text-xs text-muted-foreground">
-                {(analysis.mae || 0) < 0.05
-                  ? "Excellent"
-                  : (analysis.mae || 0) < 0.1
-                  ? "Good"
-                  : "Needs Improvement"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+//   return (
+//     <div className="grid gap-6">
+//       {/* Summary Cards */}
+//       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+//         <Card>
+//           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+//             <CardTitle className="text-sm font-medium">Mean Absolute Error</CardTitle>
+//             <TrendingDown className="h-4 w-4 text-muted-foreground" />
+//           </CardHeader>
+//           <CardContent>
+//             <div className="text-2xl font-bold">{(analysis.mae || 0).toFixed(4)}</div>
+//             <p className="text-xs text-muted-foreground">Lower is better</p>
+//             <div className="flex items-center mt-1">
+//               <div
+//                 className={`w-2 h-2 rounded-full mr-2 ${
+//                   (analysis.mae || 0) < 0.05
+//                     ? "bg-green-500"
+//                     : (analysis.mae || 0) < 0.1
+//                     ? "bg-yellow-500"
+//                     : "bg-red-500"
+//                 }`}
+//               />
+//               <span className="text-xs text-muted-foreground">
+//                 {(analysis.mae || 0) < 0.05
+//                   ? "Excellent"
+//                   : (analysis.mae || 0) < 0.1
+//                   ? "Good"
+//                   : "Needs Improvement"}
+//               </span>
+//             </div>
+//           </CardContent>
+//         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">R² Score</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {((analysis.r2_global || 0) * 100).toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground">Model fit quality</p>
-            <div className="flex items-center mt-1">
-              <Badge
-                variant={
-                  modelSignificance === "High"
-                    ? "default"
-                    : modelSignificance === "Medium"
-                    ? "secondary"
-                    : "outline"
-                }
-              >
-                {modelSignificance}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
+//         <Card>
+//           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+//             <CardTitle className="text-sm font-medium">R² Score</CardTitle>
+//             <Target className="h-4 w-4 text-muted-foreground" />
+//           </CardHeader>
+//           <CardContent>
+//             <div className="text-2xl font-bold">
+//               {((analysis.r2_global || 0) * 100).toFixed(1)}%
+//             </div>
+//             <p className="text-xs text-muted-foreground">Model fit quality</p>
+//             <div className="flex items-center mt-1">
+//               <Badge
+//                 variant={
+//                   modelSignificance === "High"
+//                     ? "default"
+//                     : modelSignificance === "Medium"
+//                     ? "secondary"
+//                     : "outline"
+//                 }
+//               >
+//                 {modelSignificance}
+//               </Badge>
+//             </div>
+//           </CardContent>
+//         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Directional Accuracy</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {((analysis.directional_accuracy || 0) * 100).toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground">Prediction direction</p>
-            <div className="flex items-center mt-1">
-              <Badge
-                variant={
-                  predictionAccuracy === "Good"
-                    ? "default"
-                    : predictionAccuracy === "Fair"
-                    ? "secondary"
-                    : "outline"
-                }
-              >
-                {predictionAccuracy}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
+//         <Card>
+//           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+//             <CardTitle className="text-sm font-medium">Directional Accuracy</CardTitle>
+//             <Activity className="h-4 w-4 text-muted-foreground" />
+//           </CardHeader>
+//           <CardContent>
+//             <div className="text-2xl font-bold">
+//               {((analysis.directional_accuracy || 0) * 100).toFixed(1)}%
+//             </div>
+//             <p className="text-xs text-muted-foreground">Prediction direction</p>
+//             <div className="flex items-center mt-1">
+//               <Badge
+//                 variant={
+//                   predictionAccuracy === "Good"
+//                     ? "default"
+//                     : predictionAccuracy === "Fair"
+//                     ? "secondary"
+//                     : "outline"
+//                 }
+//               >
+//                 {predictionAccuracy}
+//               </Badge>
+//             </div>
+//           </CardContent>
+//         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Sample Size</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(analysis.sample_size || 0).toLocaleString()}
-            </div>
-            <p className="text-xs text-muted-foreground">Data points analyzed</p>
-            <div className="flex items-center mt-1">
-              <Badge variant={sampleAdequacy === "Sufficient" ? "default" : "outline"}>
-                {sampleAdequacy}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+//         <Card>
+//           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+//             <CardTitle className="text-sm font-medium">Sample Size</CardTitle>
+//             <BarChart3 className="h-4 w-4 text-muted-foreground" />
+//           </CardHeader>
+//           <CardContent>
+//             <div className="text-2xl font-bold">
+//               {(analysis.sample_size || 0).toLocaleString()}
+//             </div>
+//             <p className="text-xs text-muted-foreground">Data points analyzed</p>
+//             <div className="flex items-center mt-1">
+//               <Badge variant={sampleAdequacy === "Sufficient" ? "default" : "outline"}>
+//                 {sampleAdequacy}
+//               </Badge>
+//             </div>
+//           </CardContent>
+//         </Card>
+//       </div>
 
-      {/* Performance chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Performance Metrics</CardTitle>
-            <CardDescription>Universal Beta Model accuracy indicators</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={performanceData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip
-                  formatter={(value: any, name: any) => [
-                    name === "R²" || name === "Dir. Acc."
-                      ? `${(value * 100).toFixed(1)}%`
-                      : value.toFixed(4),
-                    name,
-                  ]}
-                />
-                <Bar dataKey="value" fill="#3b82f6" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+//       {/* Performance chart */}
+//       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+//         <Card>
+//           <CardHeader>
+//             <CardTitle>Performance Metrics</CardTitle>
+//             <CardDescription>Universal Beta Model accuracy indicators</CardDescription>
+//           </CardHeader>
+//           <CardContent>
+//             <ResponsiveContainer width="100%" height={300}>
+//               <BarChart data={performanceData}>
+//                 <CartesianGrid strokeDasharray="3 3" />
+//                 <XAxis dataKey="name" />
+//                 <YAxis />
+//                 <Tooltip
+//                   formatter={(value: any, name: any) => [
+//                     name === "R²" || name === "Dir. Acc."
+//                       ? `${(value * 100).toFixed(1)}%`
+//                       : value.toFixed(4),
+//                     name,
+//                   ]}
+//                 />
+//                 <Bar dataKey="value" fill="#3b82f6" />
+//               </BarChart>
+//             </ResponsiveContainer>
+//           </CardContent>
+//         </Card>
 
-        {/* Insights card left unchanged for brevity */}
-        {/* ... */}
-      </div>
-    </div>
-  );
-};
+//         {/* Insights card left unchanged for brevity */}
+//         {/* ... */}
+//       </div>
+//     </div>
+//   );
+// };

@@ -52,18 +52,101 @@ interface BetaTimeSeriesData {
   }>;
 }
 
+/** Accept numbers or numeric-looking strings from the API */
+type NumericLike = number | `${number}`;
+
 /** Shared stats shape: known scalars plus "coef_*" entries */
 type SharedStats = {
   r2_global?: number;
   volatility_coeff?: number;
   y_intercept?: number;
-  /** All factor coefficients look like "coef_<name>" */
-  [key: `coef_${string}`]: number | null | undefined;
+
+  
+  // Coefficients (from your DB screenshots)
+  coef_train_b?: NumericLike | null;
+  coef_lag_train_b?: NumericLike | null;
+  coef_ar1_corr_10d?: NumericLike | null;
+  coef_ar1_corr_20d?: NumericLike | null;
+  coef_ar1_corr_60d?: NumericLike | null;
+  coef_sign_persist_20d?: NumericLike | null;
+  coef_sign_persist_60d?: NumericLike | null;
+  coef_ret_1d?: NumericLike | null;
+  coef_ret_5d?: NumericLike | null;
+  coef_ret_20d?: NumericLike | null;
+  coef_vol_63d?: NumericLike | null;
+  coef_vol_126d?: NumericLike | null;
+  coef_vol_252d?: NumericLike | null;
+  coef_vol_756d?: NumericLike | null;
+  coef_Z_ma_20d?: NumericLike | null;
+  coef_cs_rank_ret_1d?: NumericLike | null;
+  coef_cs_rank_ret_5d?: NumericLike | null;
+  coef_cs_rank_ret_20d?: NumericLike | null;
+  coef_cs_rank_z_ma_20d?: NumericLike | null;
+  coef_cs_rank_vol_63d?: NumericLike | null;
+  coef_cs_rank_vol_126d?: NumericLike | null;
+  coef_cs_rank_vol_252d?: NumericLike | null;
+  coef_cs_rank_vol_756d?: NumericLike | null;
+
+  // Averages (from your DB screenshots)
+  avg_train_b?: NumericLike | null;
+  avg_lag_train_b?: NumericLike | null;
+  avg_ar1_corr_10d?: NumericLike | null;
+  avg_ar1_corr_20d?: NumericLike | null;
+  avg_ar1_corr_60d?: NumericLike | null;
+  avg_sign_persist_20d?: NumericLike | null;
+  avg_sign_persist_60d?: NumericLike | null;
+  avg_ret_1d?: NumericLike | null;
+  avg_ret_5d?: NumericLike | null;
+  avg_ret_20d?: NumericLike | null;
+  avg_vol_63d?: NumericLike | null;
+  avg_vol_126d?: NumericLike | null;
+  avg_vol_252d?: NumericLike | null;
+  avg_vol_756d?: NumericLike | null;
+  avg_Z_ma_20d?: NumericLike | null;
+  avg_cs_rank_ret_1d?: NumericLike | null;
+  avg_cs_rank_ret_5d?: NumericLike | null;
+  avg_cs_rank_ret_20d?: NumericLike | null;
+  avg_cs_rank_z_ma_20d?: NumericLike | null;
+  avg_cs_rank_vol_63d?: NumericLike | null;
+  avg_cs_rank_vol_126d?: NumericLike | null;
+  avg_cs_rank_vol_252d?: NumericLike | null;
+  avg_cs_rank_vol_756d?: NumericLike | null;
+
+  /** Future-proof fallbacks */
+  [key: `coef_${string}`]: NumericLike | null | undefined;
+  [key: `avg_${string}`]: NumericLike | null | undefined;
 };
 
-/** Type guard to narrow unknown → number */
+
+type Entry = [string, unknown];
+
 const isFiniteNumber = (v: unknown): v is number =>
   typeof v === "number" && Number.isFinite(v);
+
+// Guard for coef_* entries with numeric values
+function isCoefEntryNumber(e: Entry): e is [string, number] {
+  return e[0].startsWith("coef_") && isFiniteNumber(e[1]);
+}
+
+// Optional: a safe formatter for tiny numbers
+function fmtNum(v: unknown) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "N/A";
+  const a = Math.abs(n);
+  if (a > 0 && a < 1e-4) return n.toExponential(2);
+  return n.toFixed(4);
+}
+// Pretty-print keys like "avg_cs_rank_vol_126d" → "Average cs rank vol 126d"
+const prettyKey = (k: string) =>
+  k
+    .replace(/^avg_/, "Average ")
+    .replace(/^coef_/, "Coefficient ")
+    .replace(/_/g, " ");
+
+
+/** Type guard to narrow unknown → number */
+// const isFiniteNumber = (v: unknown): v is number =>
+//   typeof v === "number" && Number.isFinite(v);
 
 export function BetaDashboard() {
   const [summaryData, setSummaryData] = useState<BetaSummary[]>([]);
@@ -74,6 +157,8 @@ export function BetaDashboard() {
   const [error, setError] = useState<string>("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [sharedStats, setSharedStats] = useState<SharedStats | null>(null);
+  const [showMore, setShowMore] = useState(false);
+
 
   // Modal state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -200,6 +285,11 @@ export function BetaDashboard() {
             <p className="text-sm text-gray-500 mt-1">Last updated: {lastUpdated.toLocaleString()}</p>
           )}
         </div>
+          {sharedStats && (
+          <Button variant="outline" size="sm" onClick={() => setShowMore((s) => !s)}>
+            {showMore ? "Show less" : "Show more"}
+          </Button>
+)}
       </div>
 
       {/* Error Alert */}
@@ -297,8 +387,61 @@ export function BetaDashboard() {
               })()}
             </CardContent>
           </Card>
+
+          
+
         </div>
       )}
+
+      
+      {/* Collapsible metrics */}
+      {showMore && sharedStats && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 auto-rows-fr">
+          {(() => {
+            // find top positive / negative coefficient keys to exclude
+            const coefPairs = Object.entries(sharedStats).filter(
+              ([k, v]) => k.startsWith("coef_") && Number.isFinite(Number(v))
+            ) as [string, number][];
+
+            const topPos = coefPairs.length
+              ? [...coefPairs].sort((a, b) => b[1] - a[1])[0][0] // key only
+              : null;
+
+            const topNeg = coefPairs.length
+              ? [...coefPairs].sort((a, b) => a[1] - b[1])[0][0]
+              : null;
+
+            const exclude = new Set<string>([
+              "r2_global",
+              "volatility_coeff",
+              "y_intercept",
+              topPos ?? "",
+              topNeg ?? "",
+            ]);
+
+            // collect the rest: all avg_* and coef_* remaining
+            const rest = Object.entries(sharedStats)
+              .filter(([k, v]) => (k.startsWith("avg_") || k.startsWith("coef_")) && !exclude.has(k))
+              .filter(([, v]) => Number.isFinite(Number(v)))
+              .sort(([a], [b]) => a.localeCompare(b)); // simple stable order
+
+            return rest.map(([k, v]) => (
+              <Card key={k} className="w-full min-w-0">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium truncate">{prettyKey(k)}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold break-words">{fmtNum(v)}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {k.startsWith("avg_") ? "Cross-universe average" : "Model coefficient"}
+                  </p>
+                </CardContent>
+              </Card>
+            ));
+          })()}
+        </div>
+      )}
+
 
       {/* Summary Table (clicking a ticker opens the dialog) */}
       <BetaSummaryTable data={summaryData} loading={loading} onTickerSelect={handleTickerSelect} />
@@ -343,3 +486,4 @@ export function BetaDashboard() {
     </div>
   );
 }
+

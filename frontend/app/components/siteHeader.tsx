@@ -120,19 +120,19 @@ export default function SiteHeader() {
 
   const NavLinks = ({ onClick }: { onClick?: () => void }) => (
     <>
-      <Link href="/" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
+      <Link href="/" className="block py-3 px-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Home
       </Link>
-      <Link href="/data" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
+      <Link href="/data" className="block py-3 px-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         My Data
       </Link>
-      <Link href="/config" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
+      <Link href="/config" className="block py-3 px-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Analyse
       </Link>
-      <Link href="/stocks" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
+      <Link href="/stocks" className="block py-3 px-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Stocks
       </Link>
-      <Link href="/beta" className="block py-3 px-4 text-gray-700 hover:text-gray-900" onClick={onClick}>
+      <Link href="/beta" className="block py-3 px-2 text-gray-700 hover:text-gray-900" onClick={onClick}>
         Results
       </Link>
     </>
