@@ -420,6 +420,8 @@ class StockFactorResult(models.Model):
     cs_rank_vol_126d = models.FloatField(null=True, blank=True)
     cs_rank_vol_252d = models.FloatField(null=True, blank=True)
     cs_rank_vol_756d = models.FloatField(null=True, blank=True)
+    xsec_disp_1d = models.FloatField(null=True, blank=True)
+    xsec_disp_30d = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.ticker} @ {self.created_at:%Y-%m-%d}"

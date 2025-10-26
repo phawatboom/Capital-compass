@@ -1139,6 +1139,8 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
                     b_coefficient=float(preds[j]),
                     y_intercept=intercept,
                     volatility=row.get("vol_63d") or row.get("vol_126d"),
+                    xsec_disp_1d=row.get("xsec_disp_1d"),
+                    xsec_disp_30d=row.get("xsec_disp_30d"),
                     **{k: row.get(k) for k in [
                         "train_b", "lag_train_b", "ar1_corr_10d", "ar1_corr_20d", "ar1_corr_60d",
                         "sign_persist_20d", "sign_persist_60d", "ret_1d", "ret_5d", "ret_20d",
@@ -1251,7 +1253,7 @@ if __name__ == "__main__":
     xsec_disp_1d = mxus_returns[tickers].std(axis=1)
     xsec_disp_30d = xsec_disp_1d.rolling(30, min_periods=10).mean()
     market_features['xsec_disp_30d'] = xsec_disp_30d.values
-
+    market_features['xsec_disp_1d'] = xsec_disp_1d.values
     market_features = market_features.reset_index()
     print("  ✓ Market features calculated.")
 
