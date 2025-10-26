@@ -55,6 +55,13 @@ export interface BetaSummaryRow {
   cs_rank_ret_5d?: number | null;
   cs_rank_ret_20d?: number | null;
 
+  // Cross-sectional metrics
+  xsec_disp_1d?: number | null;
+  xsec_disp_30d?: number | null;
+
+  // Horizon
+  horizon_days?: number | null;
+
   // Optional meta used by filters but not necessarily displayed
   confidence_level?: string;
   avg_r2_ols?: number | null;
@@ -291,6 +298,16 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                   Rank Return 20d {sortField === 'cs_rank_ret_20d' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
 
+                <TableHead onClick={() => handleSort('xsec_disp_1d')} className="cursor-pointer hover:bg-gray-50">
+                  XSec 1d {sortField === 'xsec_1d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('xsec_disp_30d')} className="cursor-pointer hover:bg-gray-50">
+                  XSec 30d {sortField === 'xsec_30d' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('horizon_days')} className="cursor-pointer hover:bg-gray-50">
+                  Horizon {sortField === 'horizon' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -343,6 +360,9 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                   <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_1d)}</TableCell>
                   <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_5d)}</TableCell>
                   <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_20d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.xsec_disp_1d)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.xsec_disp_30d)}</TableCell>
+                  <TableCell className="font-mono">{item.horizon_days ?? '—'}</TableCell>
 
                   <TableCell>
                     <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
