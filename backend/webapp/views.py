@@ -37,7 +37,7 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult, BetaForecastResult, MeanReversionResult, FactorSharedStats, StockFactorResult
+from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult, BetaForecastResult, MeanReversionResult, FactorSharedStats, StockFactorResult, StockPerformanceMetrics
 from datetime import date, datetime
 from django.contrib.auth import update_session_auth_hash
 from rest_framework.decorators import parser_classes
@@ -80,6 +80,35 @@ def _read_progress(upload_id: int) -> dict | None:
         return None
 
 
+class StockMetricsForRun(APIView):
+    def get(self, request, run_id: int):
+        qs = StockPerformanceMetrics.objects.filter(analysis_run_id=run_id)
+        data = StockPerformanceMetricsSerializer(qs, many=True).data
+        return Response({"run_id": run_id, "metrics": data})
+
+
+@api_view(["GET"])
+def factor_stats_summary(request, pk: int):
+    obj = get_object_or_404(FactorSharedStats, pk=pk)
+    return Response(FactorSharedStatsSerializer(obj).data)
+
+@api_view(["GET"])
+def factor_stats_latest_summary(request):
+    horizon = int(request.GET.get("horizon", 5))
+    obj = FactorSharedStats.objects.filter(horizon_days=horizon).order_by("-created_at").first()
+    if not obj:
+        return Response({"detail": "No run found for this horizon"}, status=404)
+    return Response(FactorSharedStatsSerializer(obj).data)
+
+@api_view(["GET"])
+def factor_stats_oos_table(request, pk: int):
+    order = request.GET.get("order", "-r2_oos")
+    min_n = int(request.GET.get("min_n", 10))
+    allowed = {"r2_oos","rmse_oos","mae_oos","mase_oos","diracc_oos","predstd_oos","n_oos"}
+    qs = StockOOSMetric.objects.filter(shared_stats_id=pk, n_oos__gte=min_n)
+    if order.lstrip("-") in allowed:
+        qs = qs.order_by(order)
+    return Response(list(qs.values("ticker","r2_oos","rmse_oos","mae_oos","mase_oos","diracc_oos","predstd_oos","n_oos")))
 
 # ================= New / Refactored Analysis Views (synchronous execution) ================= #
 
@@ -369,6 +398,8 @@ from .serializers import (
     AnalysisRequestSerializer,
     FactorSharedStatsSerializer,
     StockFactorResultSerializer, StockFactorTimeSeriesSerializer,
+    StockPerformanceMetricsSerializer,
+    StockOOSMetricSerializer
 )
 
 def _parse_date(date_str: str) -> date:
@@ -2101,7 +2132,8 @@ from .serializers import (
     ModelCoefficientSerializer, FoldStatisticsSerializer, StockAnalysisSerializer,
     TimeSeriesAnalysisSerializer, PredictionDistributionSerializer
 )
-from .models import AnalysisRun, ModelCoefficient, StockPrediction, StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics
+from .models import AnalysisRun, ModelCoefficient, StockPrediction, StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics, StockOOSMetric
+
 from django.db.models import Q, Count, Avg, Max, Min
 from rest_framework import generics, viewsets
 from rest_framework.decorators import action

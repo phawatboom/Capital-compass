@@ -30,6 +30,9 @@ from .views import (
     time_series_analysis,
     prediction_distribution,
     save_analysis_results,
+    factor_stats_latest_summary,
+    factor_stats_summary,
+    factor_stats_oos_table,
     # Dual-model architecture views
     #UnifiedAnalysisView,
     #UnifiedAnalysisResultView,
@@ -113,5 +116,10 @@ urlpatterns = [
     path('stock-analysis/<str:ticker>/', stock_analysis, name='stock-analysis'),
     path('time-series/<int:run_id>/<str:ticker>/', time_series_analysis, name='time-series-analysis'),
     path('prediction-distribution/<int:run_id>/', prediction_distribution, name='prediction-distribution'),
+
     path('save-analysis/', save_analysis_results, name='save-analysis-results'),
+    path("factor-stats/<int:pk>/summary/", factor_stats_summary, name="factor-stats-summary"),
+    path("factor-stats/<int:pk>/oos/", factor_stats_oos_table, name="factor-stats-oos"),
+    path("factor-stats/latest/summary/", factor_stats_latest_summary),
+    
 ]

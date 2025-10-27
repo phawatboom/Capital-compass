@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    Stock, StockData, CSVUploadRecord, UserProfile, 
+    Stock, StockData, CSVUploadRecord, StockOOSMetric, UserProfile, 
     BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation, StockFactorResult, FactorSharedStats,
     AnalysisRun, ModelCoefficient, StockPrediction, StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics
 )
@@ -308,6 +308,50 @@ class StockFactorTimeSeriesSerializer(serializers.ModelSerializer):
             "horizon_days",
         ]
 
+class FactorSharedStatsSummarySerializer(serializers.ModelSerializer):
+    top_abs   = serializers.SerializerMethodField()
+    top_pos   = serializers.SerializerMethodField()
+    top_neg   = serializers.SerializerMethodField()
+    equation  = serializers.CharField(source="model_equation", read_only=True)
+    config    = serializers.SerializerMethodField()
+    class Meta:
+        model = FactorSharedStats
+        fields = ["id", "created_at", "model_used", "horizon_days",
+                  "r2_global", "equation", "top_abs", "top_pos", "top_neg", "config"]
+
+    def _sorted(self, obj):
+        items = (obj.coef_raw or {}).items()
+        return sorted(items, key=lambda kv: abs(kv[1]), reverse=True)
+
+    def get_top_abs(self, obj):
+        s = self._sorted(obj)
+        return {"feature": s[0][0], "coef": s[0][1]} if s else None
+
+    def get_top_pos(self, obj):
+        pos = [(k, v) for k, v in (obj.coef_raw or {}).items() if v > 0]
+        if not pos: return None
+        k, v = max(pos, key=lambda kv: kv[1]); return {"feature": k, "coef": v}
+
+    def get_top_neg(self, obj):
+        neg = [(k, v) for k, v in (obj.coef_raw or {}).items() if v < 0]
+        if not neg: return None
+        k, v = min(neg, key=lambda kv: kv[1]); return {"feature": k, "coef": v}
+
+    def get_config(self, obj):
+        return {
+            "training_days": obj.training_days,
+            "testing_days": obj.testing_days,
+            "enet_alpha": obj.enet_alpha,
+            "enet_l1_ratio": obj.enet_l1_ratio,
+            "oos_min_train_rows": getattr(obj, "oos_min_train_rows", None),
+        }
+
+
+class StockOOSMetricSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockOOSMetric
+        fields = ["ticker", "r2_oos", "rmse_oos", "mae_oos", "mase_oos",
+                  "diracc_oos", "predstd_oos", "n_oos"]
 # Pooled Model Output Serializers
 class AnalysisRunSerializer(serializers.ModelSerializer):
     """Serializer for analysis runs with comprehensive metrics"""

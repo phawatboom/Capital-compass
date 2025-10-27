@@ -1090,6 +1090,38 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
     coeffs = dict(zip(enet_bundle['train_cols'], model.coef_))
     intercept = model.intercept_
 
+    # add this:
+    scaler = pipeline.named_steps.get('scaler', None)
+    cols = enet_bundle['train_cols']
+
+    import numpy as np
+    import pandas as pd
+
+    coef_std = pd.Series(model.coef_, index=cols, dtype=float)
+    b0_std = float(model.intercept_)
+
+    # pull scaler stats safely
+    if scaler is not None and hasattr(scaler, "mean_") and hasattr(scaler, "scale_"):
+        mu = scaler.mean_
+        sigma = scaler.scale_
+    else:
+        # fallback if no scaler present
+        mu = np.zeros(len(cols))
+        sigma = np.ones(len(cols))
+
+    # convert to original feature scale
+    coef_raw_vals = (coef_std.values / sigma).astype(float)
+    b0_raw = float(b0_std - np.sum(coef_std.values * mu / sigma))
+
+    coef_std_dict = {c: float(v) for c, v in zip(cols, coef_std.values)}
+    coef_raw_dict = {c: float(v) for c, v in zip(cols, coef_raw_vals)}
+    feature_means_dict = {c: float(m) for c, m in zip(cols, mu)}
+    feature_scales_dict = {c: float(s) for c, s in zip(cols, sigma)}
+
+    # human readable equation string (raw space, top 8 by |coef|)
+    top_terms = sorted(coef_raw_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:8]
+    model_equation = "y = " + f"{b0_raw:+.6f} " + " ".join([f"{v:+.6f}·{k}" for k, v in top_terms])
+
     # --- Global R² ---
     oos_preds, metrics, _ = walk_forward_oos_eval(
         pooled_df,
@@ -1111,10 +1143,114 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
         r2_global=metrics.get("R2_global"),
         volatility_coeff=intercept,
         horizon_days=horizon,
+
+        # new fields
+        coef_std=coef_std_dict,         # keep standardized coefs for audit
+        intercept_raw=b0_raw,           # raw intercept for human equation
+        coef_raw=coef_raw_dict,         # raw coefs for UI
+        feature_means=feature_means_dict,
+        feature_scales=feature_scales_dict,
+        model_equation=model_equation,
+
+        # new config fields
+        training_days=int(best_params.get("base_train_len_days", None)),
+        testing_days=int(best_params.get("base_test_len_days", None)),
+        enet_alpha=float(best_params.get("enet_alpha", None)),
+        enet_l1_ratio=float(best_params.get("enet_l1_ratio", None)),
+        oos_min_train_rows=int(best_params.get("oos_min_train_rows_fixed", None)),
+        run_params={
+            "base_train_len_days": int(best_params.get("base_train_len_days", 0)),
+            "base_test_len_days":  int(best_params.get("base_test_len_days", 0)),
+            "enet_alpha":          float(best_params.get("enet_alpha", 0.0)),
+            "enet_l1_ratio":       float(best_params.get("enet_l1_ratio", 0.0)),
+            "dropna_rows":         False,  # since you pass dropna_rows=False
+        },
+
         **{f"coef_{k}": v for k, v in coeffs.items() if hasattr(FactorSharedStats, f"coef_{k}")},
         **{f"avg_{k}": pooled_df[k].mean() if k in pooled_df.columns else None
            for k in [c for c in enet_bundle['train_cols'] if hasattr(FactorSharedStats, f"avg_{c}")]},
     )
+
+    # --- Save per-ticker OUT-OF-SAMPLE metrics for the frontend table ---
+    from .models import StockOOSMetric
+
+    # Defensive: skip if no OOS preds
+    if oos_preds is not None and not oos_preds.empty:
+        # Clean and aggregate per ticker
+        oos_clean = oos_preds[['Ticker', 'actual_b', 'pred_b']].copy()
+        oos_clean['actual_b'] = pd.to_numeric(oos_clean['actual_b'], errors='coerce')
+        oos_clean['pred_b'] = pd.to_numeric(oos_clean['pred_b'], errors='coerce')
+        oos_clean = oos_clean.replace([np.inf, -np.inf], np.nan).dropna()
+
+        def safe_r2(g):
+            if len(g) < 2 or np.std(g['actual_b']) < 1e-9:
+                return np.nan
+            try:
+                return r2_score(g['actual_b'], g['pred_b'])
+            except ValueError:
+                return np.nan
+
+        def rmse(g):
+            if len(g) < 1:
+                return np.nan
+            return np.sqrt(mean_squared_error(g['actual_b'], g['pred_b']))
+
+        def mae(g):
+            if len(g) < 1:
+                return np.nan
+            return mean_absolute_error(g['actual_b'], g['pred_b'])
+
+        def dir_acc(g):
+            if len(g) < 1:
+                return np.nan
+            return float(np.mean(np.sign(g['actual_b']) == np.sign(g['pred_b'])))
+
+        def pred_std(g):
+            if len(g) < 1:
+                return np.nan
+            return float(np.std(g['pred_b']))
+
+        agg = (
+            oos_clean.groupby('Ticker')
+            .apply(lambda g: pd.Series({
+                'r2_oos': safe_r2(g),
+                'rmse_oos': rmse(g),
+                'mae_oos': mae(g),
+                # simple MASE proxy: MAE divided by in-sample MAE baseline is not available here,
+                # so keep NaN or compute a simple scale by MAE of a naive model if you have it.
+                'mase_oos': np.nan,
+                'diracc_oos': dir_acc(g),
+                'predstd_oos': pred_std(g),
+                'n_oos': int(len(g)),
+            }))
+            .reset_index()
+            .rename(columns={'Ticker': 'ticker'})
+        )
+
+        # Optional: drop very small n
+        # agg = agg[agg['n_oos'] >= 10]
+
+        # Replace existing rows for this shared run to avoid duplicates on rerun
+        StockOOSMetric.objects.filter(shared_stats=shared).delete()
+
+        # Bulk insert into the table the frontend endpoint reads
+        rows = [
+            StockOOSMetric(
+                shared_stats=shared,
+                ticker=row['ticker'],
+                horizon_days=horizon,
+                r2_oos=None if pd.isna(row['r2_oos']) else float(row['r2_oos']),
+                rmse_oos=None if pd.isna(row['rmse_oos']) else float(row['rmse_oos']),
+                mae_oos=None if pd.isna(row['mae_oos']) else float(row['mae_oos']),
+                mase_oos=None if pd.isna(row['mase_oos']) else float(row['mase_oos']),
+                diracc_oos=None if pd.isna(row['diracc_oos']) else float(row['diracc_oos']),
+                predstd_oos=None if pd.isna(row['predstd_oos']) else float(row['predstd_oos']),
+                n_oos=int(row['n_oos']),
+            )
+            for _, row in agg.iterrows()
+        ]
+        if rows:
+            StockOOSMetric.objects.bulk_create(rows, batch_size=1000)
 
     # --- ✅ NEW: Generate rolling time series predictions ---
     print("📈 Generating rolling stock time series for visualization...")

@@ -69,6 +69,14 @@ export interface BetaSummaryRow {
   forecast_count?: number | null;
   latest_beta_pred?: number | null;
   latest_beta_true?: number | null;
+
+  r2_oos?: number | null;
+  mae_oos?: number | null;
+  rmse_oos?: number | null;
+  diracc_oos?: number | null;
+  predstd_oos?: number | null;
+  n_oos?: number | null;
+  
 }
 
 export interface BetaSummaryTableProps {
@@ -262,6 +270,21 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
 
                 <TableHead>Trend</TableHead>
 
+                <TableHead onClick={() => handleSort('r2_oos')} className="cursor-pointer hover:bg-gray-50">
+                  R2 OOS {sortField === 'r2_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                
+                {/* add these three right after R2 OOS */}
+                <TableHead onClick={() => handleSort('rmse_oos')} className="cursor-pointer hover:bg-gray-50">
+                  RMSE OOS {sortField === 'rmse_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('mae_oos')} className="cursor-pointer hover:bg-gray-50">
+                  MAE OOS {sortField === 'mae_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+                <TableHead onClick={() => handleSort('diracc_oos')} className="cursor-pointer hover:bg-gray-50">
+                  DirAcc OOS {sortField === 'diracc_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
                 <TableHead onClick={() => handleSort('volatility')} className="cursor-pointer hover:bg-gray-50">
                   Volatility {sortField === 'volatility' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
@@ -372,6 +395,12 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                       <TrendingDown className="h-4 w-4 text-red-600" />
                     )}
                   </TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.r2_oos)}</TableCell>
+ 
+                  {/* add these three cells right after */}
+                  <TableCell className="font-mono">{formatNumber(item.rmse_oos)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.mae_oos)}</TableCell>
+                  <TableCell className="font-mono">{formatNumber(item.diracc_oos)}</TableCell>
 
                   <TableCell className="font-mono">{formatNumber(item.volatility)}</TableCell>
 
