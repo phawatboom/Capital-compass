@@ -40,18 +40,28 @@ backend/backend/db-media/
 .DS_Store
 Thumbs.db
 
-# Data Analysis results and outputs (IMPORTANT: Exclude large files)
-Data Analysis/results/
-Data Analysis/outputs/
-Data Analysis/test_results/
-Data Analysis/charts/
-Data Analysis/logs/
+# data-analysis results and outputs (IMPORTANT: Exclude large files)
+data-analysis/results/
+data-analysis/outputs/
+data-analysis/test_results/
+data-analysis/charts/
+data-analysis/logs/
+data-analysis/Pooled_Outputs*/
+data-analysis/iterations/
+data-analysis/stable_versions/
+"Data Analysis/"
+**/"Data Analysis/"
 
-# Data files
-Data Analysis/MXUS_Data.xlsx
+# Data files and CSV outputs
+data-analysis/MXUS_Data.xlsx
 Data Analysis/*.xlsx
 Data Analysis/*.csv
 Data Analysis/Data/*.csv
+*.csv
+**/*.csv
+!requirements.txt
+!package.json
+!backend/webapp/fixtures/*.csv
 
 # Backend uploaded files and results
 backend/db-media/
@@ -88,3 +98,117 @@ frontend/.next/
 frontend/out/
 frontend/dist/
 frontend/build/
+
+# Copilot and AI generated files
+Copilot-Processing.md
+*.copilot.md
+*_copilot_*
+*.prompt
+*.prompt.txt
+*.prompt.md
+prompt_files/
+prompts/
+**prompts/
+ai_generated/
+.copilot/
+
+# GitHub Copilot instructions and chatmodes (development only)
+.github/chatmodes/
+.github/collections/
+.github/instructions/
+**/.github/chatmodes/
+**/.github/collections/
+**/.github/instructions/
+
+# Copilot workspace files (development only)
+chatmodes/
+collections/
+instructions/
+prompts/
+scripts/
+**chatmodes/
+**collections/
+**instructions/
+**prompts/
+**scripts/
+
+# Analysis and result files
+results/
+output/
+outputs/
+exports/
+analysis_results/
+*.csv.analysis
+*.result
+model_outputs/
+predictions/
+
+# Development and documentation files
+*_GUIDE.md
+*_COMPLETE.md
+*_REPORT.md
+*_CHECKLIST.md
+CLEANUP_*.md
+DEPLOYMENT_*.md
+IMPLEMENTATION_*.md
+TECHNICAL_*.md
+CLIENT_*.md
+FAQ_*.md
+VIEW_*.md
+
+# Test files and scripts
+test_data*.csv
+test_datasets.py
+test_end_to_end.py
+create_large_dataset.py
+final_validation.py
+health_check.*
+multithread_test.py
+test_functions.py
+test_improvements.py
+test_new_metrics.py
+
+# R and Jupyter files
+*.R
+*.ipynb
+strategy_*.ipynb
+
+# Testing artifacts
+test_data/
+test_results/
+*.test.csv
+test_outputs/
+screenshots/
+test_reports/
+
+# Documentation drafts and notes
+drafts/
+notes/
+scratch/
+todo.md
+TODO.md
+notes.md
+NOTES.md
+
+# Temporary processing files
+processing/
+temp_files/
+.temp/
+working/
+*.processing
+
+# Large data files
+*.zip
+*.tar.gz
+*.rar
+large_datasets/
+data_dumps/
+
+# Memory bank tracking (development only)
+memory-bank/.agent_work/
+.agent_work/
+
+# Build artifacts
+build_artifacts/
+compiled/
+generated/

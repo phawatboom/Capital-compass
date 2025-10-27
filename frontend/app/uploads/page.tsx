@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Download,
   Search,
@@ -81,7 +83,8 @@ function getCsrfToken(): string | null {
 }
 
 export default function UploadsPage() {
-  const [analyzingId, setAnalyzingId] = useState<number | null>(null);// State for the "Analyze" button
+  const router = useRouter();
+  
   const [results, setResults] = useState([]); // State for storing analysis results
   // Data
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
@@ -208,51 +211,10 @@ export default function UploadsPage() {
     if (kind === "day") setDayFilter(null);
   };
 
-    const handleAnalyze = async (uploadId: number) => {
-      setAnalyzingId(uploadId);
-      setError(null);
-      try {
-        const token = await ensureCsrf();
-        const response = await fetch(`${API_BASE}/csv-uploads/${uploadId}/analyze/`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "X-CSRFToken": token,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          const errorMessage =
-            errorData?.error ||
-            errorData?.details ||
-            `Analysis failed with status: ${response.status}`;
-          throw new Error(errorMessage);
-        }
-
-        const disposition = response.headers.get("Content-Disposition");
-        let filename = "forecast.csv";
-        if (disposition && disposition.includes("filename=")) {
-          filename = disposition.split("filename=")[1].replace(/"/g, "");
-        }
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      } catch (err: any) {
-        setError(err.message || "An unknown error occurred.");
-      } finally {
-        setAnalyzingId(null); // reset only after finishing
-      }
+    const handleAnalyze = (uploadId: number) => {
+      // Navigate to new data page with the file ID for analysis
+      router.push(`/data?fileId=${uploadId}`);
     };
-
   const handleSelectAllOnPage = (checked: boolean) => {
     const next = new Set(selected);
     pageData.forEach((u) => {
@@ -456,6 +418,24 @@ export default function UploadsPage() {
   return (
     <RequireAuth>
       <div className="mx-auto w-full max-w-screen-xl px-3 sm:px-4 py-6">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">My Data</h1>
+              <p className="text-gray-600 text-sm mt-1">
+                View and manage your uploaded data files
+              </p>
+            </div>
+            <Link href="/upload">
+              <Button className="inline-flex items-center gap-2">
+                <UploadIcon className="w-4 h-4" />
+                Upload New Data
+              </Button>
+            </Link>
+          </div>
+        </div>
+
         {/*<div className="mb-6">*/}
         {/*  <form onSubmit={handleUpload} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">*/}
         {/*    <input*/}
@@ -702,10 +682,9 @@ export default function UploadsPage() {
                               variant="outline"
                               className="h-8 px-2"
                               onClick={() => handleAnalyze(u.id)}
-                              disabled={analyzingId === u.id}
-                              title="Analyze"
+                              title="Analyze with Beta Model"
                             >
-                              {analyzingId === u.id ? "Analyzing..." : "Analyze"}
+                              Analyze
                             </Button>
                             <Button
                               type="button"

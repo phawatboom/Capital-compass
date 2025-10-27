@@ -51,7 +51,7 @@ export default function StocksPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-center">📈 Stocks</h1>
+      <h1 className="text-3xl font-bold mb-6 text-center text-gray-900">Stocks</h1>
 
       <input
         type="text"
@@ -64,19 +64,6 @@ export default function StocksPage() {
       {loading && <p>Loading stocks...</p>}
       {error && <p className="text-red-600">{error}</p>}
 
-      <select
-        className="border px-3 py-2 rounded shadow-sm mb-6"
-        value={filterMode}
-        onChange={(e) => {
-          setFilterMode(e.target.value as "all" | "trending" | "meanreverting");
-          setCurrentPage(1);
-        }}
-      >
-        <option value="all">All Stocks</option>
-        <option value="trending">{"Trending Stocks (β > 0, significant)"}</option>
-        <option value="meanreverting">{"Mean-Reverting Stocks (β < 0, significant)"}</option>
-      </select>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {currentStocks.map((stock) => (
           <Link
@@ -84,7 +71,7 @@ export default function StocksPage() {
             href={`/stocks/${stock.id}`}
             className="block p-4 border rounded-lg shadow hover:shadow-md transition hover:bg-blue-50"
           >
-            <h2 className="font-semibold text-lg text-blue-700">{stock.name}</h2>
+            <h2 className="font-semibold text-lg text-gray-800">{stock.name}</h2>
             <p className="text-sm text-gray-500">View details →</p>
           </Link>
         ))}

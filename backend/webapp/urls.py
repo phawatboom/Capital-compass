@@ -1,10 +1,10 @@
-from django.urls import path
+from django.urls import path, include
 from django.conf.urls.static import static
 from django.conf import settings
-from .views import analyze_upload
-
+from rest_framework.routers import DefaultRouter
 
 from .views import (
+    upload_status,
     FileUploadView,
     stock_list,
     stock_details,
@@ -19,21 +19,54 @@ from .views import (
     profile_view,
     profile_avatar,
     change_password,
+    factor_shared,
+    factor_summary,
+    analyze_upload,
+    beta_timeseries,
+    # Pooled Model API views
+    AnalysisRunViewSet,
+    dashboard_summary,
+    stock_analysis,
+    time_series_analysis,
+    prediction_distribution,
+    save_analysis_results,
     # Dual-model architecture views
-    UnifiedAnalysisView,
-    UnifiedAnalysisResultView,
-    ModelComparisonView,
+    #UnifiedAnalysisView,
+    #UnifiedAnalysisResultView,
+    #ModelComparisonView,
     # Beta coefficient model output views
-    BetaRealizedListView,
-    ForecastEvaluationListView,
-    BetaCoefficientSummaryView,
-    BetaCoefficientTimeSeriesView,
-    ImportBetaDataView,
+    #BetaRealizedListView,
+    #ForecastEvaluationListView,
+    #BetaCoefficientSummaryView,
+    #BetaCoefficientTimeSeriesView,
+    #ImportBetaDataView,
 )
+
+# Universal model imports
+# from .views_universal import (
+#     ImportUniversalDataView,
+#     UniversalBetaDashboardView,
+#     UniversalBetaTimeSeriesView,
+#     UniversalModelSummaryView,
+# )
+
+# Integrated workflow imports
+from .views_integrated import (
+    IntegratedUploadView,
+    RunModelView,
+    ClientStatusView,
+    ClientResultsView,
+    ClientListView,
+)
+
+# Create router for ViewSets
+router = DefaultRouter()
+router.register(r'analysis-runs', AnalysisRunViewSet, basename='analysis-run')
 
 urlpatterns = [
     # Data & files
-    path('upload-csv/', FileUploadView.as_view(), name='upload-csv'),
+    path("upload-csv/", FileUploadView.as_view(), name="upload-csv"),
+    path("uploads/<int:pk>/status/", upload_status, name="upload-status"),
     path('stocks/', stock_list, name='stock-list'),
     path('stocks/<int:pk>/', stock_details, name='stock-details'),
     path('csv-uploads/', list_csv_uploads, name='list-csv-uploads'),
@@ -56,15 +89,29 @@ urlpatterns = [
     # Model analysis
     path('csv-uploads/<int:pk>/analyze/', analyze_upload, name='analyze-upload'),
     
-    # Unified analysis endpoints
-    path('analysis/unified/', UnifiedAnalysisView.as_view(), name='unified-analysis'),
-    path('analysis/<str:ticker>/<str:model_type>/', UnifiedAnalysisResultView.as_view(), name='unified-analysis-result'),
-    path('analysis/<str:ticker>/compare/', ModelComparisonView.as_view(), name='model-comparison'),
+    # Trey's factor endpoints (from his implementation)
+    path("factors/summary/", factor_summary, name="factor-summary"),
+    path("factors/shared/", factor_shared, name="factor-shared"),
+    path("beta/timeseries/<str:ticker>/", beta_timeseries, name="beta_timeseries"),
     
-    # Beta coefficient model output endpoints
-    path('beta/realized/', BetaRealizedListView.as_view(), name='beta-realized-list'),
-    path('beta/forecast-evaluation/', ForecastEvaluationListView.as_view(), name='forecast-evaluation-list'),
-    path('beta/summary/', BetaCoefficientSummaryView.as_view(), name='beta-summary'),
-    path('beta/timeseries/<str:ticker>/', BetaCoefficientTimeSeriesView.as_view(), name='beta-timeseries'),
-    path('beta/import/', ImportBetaDataView.as_view(), name='import-beta-data'),
+    # Universal Beta Model endpoints (PRIMARY for client use) - Commented out until views_universal.py is created
+    # path('universal/import/', ImportUniversalDataView.as_view(), name='universal-import'),
+    # path('universal/dashboard/', UniversalBetaDashboardView.as_view(), name='universal-dashboard'),
+    # path('universal/timeseries/', UniversalBetaTimeSeriesView.as_view(), name='universal-timeseries'),
+    # path('universal/summary/', UniversalModelSummaryView.as_view(), name='universal-summary'),
+    
+    # Integrated Client Workflow endpoints (Upload -> Process -> View)
+    path('integrated/upload/', IntegratedUploadView.as_view(), name='integrated-upload'),
+    path('integrated/run-model/', RunModelView.as_view(), name='integrated-run-model'),
+    path('integrated/status/<str:client_id>/', ClientStatusView.as_view(), name='integrated-status'),
+    path('integrated/results/<str:client_id>/', ClientResultsView.as_view(), name='integrated-results'),
+    path('integrated/clients/', ClientListView.as_view(), name='integrated-clients'),
+    
+    # Pooled Model API endpoints
+    path('', include(router.urls)),  # ViewSet routes (includes analysis-runs/)
+    path('dashboard-summary/', dashboard_summary, name='dashboard-summary'),
+    path('stock-analysis/<str:ticker>/', stock_analysis, name='stock-analysis'),
+    path('time-series/<int:run_id>/<str:ticker>/', time_series_analysis, name='time-series-analysis'),
+    path('prediction-distribution/<int:run_id>/', prediction_distribution, name='prediction-distribution'),
+    path('save-analysis/', save_analysis_results, name='save-analysis-results'),
 ]

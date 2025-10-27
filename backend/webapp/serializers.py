@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     Stock, StockData, CSVUploadRecord, UserProfile, 
-    BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation
+    BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation, StockFactorResult, FactorSharedStats,
+    AnalysisRun, ModelCoefficient, StockPrediction, StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics
 )
 from django.contrib.auth import get_user_model
 
@@ -243,3 +244,237 @@ class BetaCoefficientTimeSeriesSerializer(serializers.Serializer):
     confidence_bands = serializers.ListField(
         child=serializers.DictField(child=serializers.FloatField())
     )
+
+
+class FactorSharedStatsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FactorSharedStats
+        fields = "__all__"
+
+
+class StockFactorResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockFactorResult
+        fields = [
+            "id",
+            "ticker",
+            "b_coefficient",
+            "y_intercept",
+            "volatility",
+            "train_b",
+            "lag_train_b",
+            "ar1_corr_10d",
+            "ar1_corr_20d",
+            "ar1_corr_60d",
+            "sign_persist_20d",
+            "sign_persist_60d",
+            "ret_1d",
+            "ret_5d",
+            "ret_20d",
+            "vol_63d",
+            "vol_126d",
+            "vol_252d",
+            "vol_756d",
+            "Z_ma_20d",
+            "cs_rank_ret_1d",
+            "cs_rank_ret_5d",
+            "cs_rank_ret_20d",
+            "cs_rank_z_ma_20d",
+            "xsec_disp_1d",
+            "xsec_disp_30d",
+            "created_at",
+            "shared_stats_id",
+            "horizon_days",  
+        ]
+
+
+class StockFactorTimeSeriesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockFactorResult
+        fields = [
+            "created_at",
+            "b_coefficient",
+            "volatility",
+            "train_b",
+            "lag_train_b",
+            "ret_1d",
+            "ret_5d",
+            "ret_20d",
+            "vol_63d",
+            "vol_126d",
+            "vol_252d",
+            "vol_756d",
+            "Z_ma_20d",
+            "horizon_days",
+        ]
+
+# Pooled Model Output Serializers
+class AnalysisRunSerializer(serializers.ModelSerializer):
+    """Serializer for analysis runs with comprehensive metrics"""
+    
+    duration_seconds = serializers.SerializerMethodField()
+    total_predictions = serializers.SerializerMethodField()
+    unique_stocks = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = AnalysisRun
+        fields = [
+            'id', 'run_name', 'model_type', 'horizon_days', 'created_at', 'completed_at', 'status',
+            'mae', 'rmse', 'directional_accuracy', 'sample_size', 'r2_global', 'r2_fold_mean', 'r2_fold_weighted',
+            'mae_ratio_global', 'mae_ratio_fold_mean', 'mae_ratio_fold_weighted',
+            'duration_seconds', 'total_predictions', 'unique_stocks'
+        ]
+    
+    def get_duration_seconds(self, obj):
+        if obj.completed_at and obj.created_at:
+            return (obj.completed_at - obj.created_at).total_seconds()
+        return None
+    
+    def get_total_predictions(self, obj):
+        return obj.predictions.count()
+    
+    def get_unique_stocks(self, obj):
+        return obj.predictions.values('ticker').distinct().count()
+
+
+class ModelCoefficientSerializer(serializers.ModelSerializer):
+    """Serializer for model coefficients"""
+    
+    class Meta:
+        model = ModelCoefficient
+        fields = ['feature_name', 'coefficient_value']
+
+
+class StockPredictionSerializer(serializers.ModelSerializer):
+    """Serializer for individual stock predictions with all features"""
+    
+    class Meta:
+        model = StockPrediction
+        fields = [
+            'ticker', 'prediction_date', 'final_prediction',
+            'train_b', 'lag_train_b', 'ar1_corr_10d', 'ar1_corr_20d', 'ar1_corr_60d',
+            'sign_persist_20d', 'sign_persist_60d', 'ret_1d', 'ret_5d', 'ret_20d',
+            'vol_63d', 'vol_126d', 'vol_252d', 'vol_756d', 'z_ma_20d',
+            'cs_rank_ret_1d', 'cs_rank_ret_5d', 'cs_rank_ret_20d', 'cs_rank_z_ma_20d',
+            'cs_rank_vol_63d', 'cs_rank_vol_126d', 'cs_rank_vol_252d', 'cs_rank_vol_756d',
+            'xsec_disp_30d'
+        ]
+
+
+class StockPredictionSummarySerializer(serializers.ModelSerializer):
+    """Simplified serializer for stock prediction summaries"""
+    
+    class Meta:
+        model = StockPrediction
+        fields = ['ticker', 'prediction_date', 'final_prediction', 'train_b', 'ret_1d', 'vol_63d']
+
+
+class StockPerformanceMetricsSerializer(serializers.ModelSerializer):
+    """Serializer for per-stock performance metrics"""
+    
+    class Meta:
+        model = StockPerformanceMetrics
+        fields = [
+            'ticker', 'r2_oos', 'rmse_oos', 'mae_oos', 'mase_oos', 
+            'dir_acc_oos', 'pred_std_oos', 'n_obs_oos'
+        ]
+
+
+class OutOfSamplePredictionSerializer(serializers.ModelSerializer):
+    """Serializer for out-of-sample predictions"""
+    
+    class Meta:
+        model = OutOfSamplePrediction
+        fields = [
+            'ticker', 'date', 'y_pred', 'y_actual', 'prediction_error', 
+            'abs_error', 'squared_error', 'fold_id'
+        ]
+
+
+class FoldStatisticsSerializer(serializers.ModelSerializer):
+    """Serializer for cross-validation fold statistics"""
+    
+    class Meta:
+        model = FoldStatistics
+        fields = [
+            'fold_id', 'fold_r2', 'fold_mae', 'fold_rmse', 'fold_directional_acc', 'fold_n_obs',
+            'train_start_date', 'train_end_date', 'val_start_date', 'val_end_date'
+        ]
+
+
+class AnalysisRunDetailSerializer(AnalysisRunSerializer):
+    """Detailed serializer with related data"""
+    
+    coefficients = ModelCoefficientSerializer(many=True, read_only=True)
+    fold_statistics = FoldStatisticsSerializer(many=True, read_only=True)
+    top_performers = serializers.SerializerMethodField()
+    worst_performers = serializers.SerializerMethodField()
+    
+    class Meta(AnalysisRunSerializer.Meta):
+        fields = AnalysisRunSerializer.Meta.fields + [
+            'coefficients', 'fold_statistics', 'top_performers', 'worst_performers'
+        ]
+    
+    def get_top_performers(self, obj):
+        """Get top 10 stocks by directional accuracy"""
+        top_stocks = obj.stock_metrics.order_by('-dir_acc_oos')[:10]
+        return StockPerformanceMetricsSerializer(top_stocks, many=True).data
+    
+    def get_worst_performers(self, obj):
+        """Get bottom 10 stocks by directional accuracy"""
+        worst_stocks = obj.stock_metrics.order_by('dir_acc_oos')[:10]
+        return StockPerformanceMetricsSerializer(worst_stocks, many=True).data
+
+
+class DashboardSummarySerializer(serializers.Serializer):
+    """Serializer for dashboard summary data"""
+    
+    total_runs = serializers.IntegerField()
+    latest_run = AnalysisRunSerializer(allow_null=True)
+    avg_directional_accuracy = serializers.FloatField()
+    avg_r2 = serializers.FloatField()
+    total_predictions = serializers.IntegerField()
+    unique_stocks = serializers.IntegerField()
+    recent_activity = serializers.ListField(child=AnalysisRunSerializer())
+
+
+class StockAnalysisSerializer(serializers.Serializer):
+    """Serializer for individual stock analysis across runs"""
+    
+    ticker = serializers.CharField()
+    total_predictions = serializers.IntegerField()
+    avg_prediction = serializers.FloatField()
+    avg_performance = serializers.FloatField()
+    best_r2 = serializers.FloatField()
+    latest_prediction = serializers.FloatField(allow_null=True)
+    latest_date = serializers.DateField(allow_null=True)
+    recent_predictions = StockPredictionSummarySerializer(many=True)
+
+
+class ModelComparisonAnalysisSerializer(serializers.Serializer):
+    """Serializer for comparing different model runs"""
+    
+    model_a = AnalysisRunSerializer()
+    model_b = AnalysisRunSerializer()
+    performance_comparison = serializers.DictField()
+    coefficient_differences = serializers.ListField(child=serializers.DictField())
+
+
+class TimeSeriesAnalysisSerializer(serializers.Serializer):
+    """Serializer for time series analysis data"""
+    
+    dates = serializers.ListField(child=serializers.DateField())
+    predictions = serializers.ListField(child=serializers.FloatField())
+    actuals = serializers.ListField(child=serializers.FloatField(allow_null=True))
+    errors = serializers.ListField(child=serializers.FloatField(allow_null=True))
+    cumulative_r2 = serializers.ListField(child=serializers.FloatField())
+
+
+class PredictionDistributionSerializer(serializers.Serializer):
+    """Serializer for prediction distribution analysis"""
+    
+    bins = serializers.ListField(child=serializers.FloatField())
+    counts = serializers.ListField(child=serializers.IntegerField())
+    percentiles = serializers.DictField(child=serializers.FloatField())
+    statistics = serializers.DictField(child=serializers.FloatField())
+

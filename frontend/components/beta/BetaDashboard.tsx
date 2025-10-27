@@ -1,13 +1,34 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { BetaSummaryTable } from '@/components/beta/BetaSummaryTable';
-import { BetaTimeSeriesChart } from '@/components/beta/BetaTimeSeriesChart';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Download, RefreshCw } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { BetaSummaryTable } from "@/components/beta/BetaSummaryTable";
+import { BetaTimeSeriesChart } from "@/components/beta/BetaTimeSeriesChart";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+/** API base URL - adjust based on your backend configuration */
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Build absolute URLs robustly and safely encode path segments */
+const api = (path: string) => new URL(path, API_BASE).toString();
+const seg = (s: string) => encodeURIComponent(String(s).trim());
 
 interface BetaSummary {
   ticker: string;
@@ -31,27 +52,140 @@ interface BetaTimeSeriesData {
   }>;
 }
 
+/** Accept numbers or numeric-looking strings from the API */
+type NumericLike = number | `${number}`;
+
+/** Shared stats shape: known scalars plus "coef_*" entries */
+type SharedStats = {
+  r2_global?: number;
+  volatility_coeff?: number;
+  y_intercept?: number;
+
+  
+  // Coefficients (from your DB screenshots)
+  coef_train_b?: NumericLike | null;
+  coef_lag_train_b?: NumericLike | null;
+  coef_ar1_corr_10d?: NumericLike | null;
+  coef_ar1_corr_20d?: NumericLike | null;
+  coef_ar1_corr_60d?: NumericLike | null;
+  coef_sign_persist_20d?: NumericLike | null;
+  coef_sign_persist_60d?: NumericLike | null;
+  coef_ret_1d?: NumericLike | null;
+  coef_ret_5d?: NumericLike | null;
+  coef_ret_20d?: NumericLike | null;
+  coef_vol_63d?: NumericLike | null;
+  coef_vol_126d?: NumericLike | null;
+  coef_vol_252d?: NumericLike | null;
+  coef_vol_756d?: NumericLike | null;
+  coef_Z_ma_20d?: NumericLike | null;
+  coef_cs_rank_ret_1d?: NumericLike | null;
+  coef_cs_rank_ret_5d?: NumericLike | null;
+  coef_cs_rank_ret_20d?: NumericLike | null;
+  coef_cs_rank_z_ma_20d?: NumericLike | null;
+  coef_cs_rank_vol_63d?: NumericLike | null;
+  coef_cs_rank_vol_126d?: NumericLike | null;
+  coef_cs_rank_vol_252d?: NumericLike | null;
+  coef_cs_rank_vol_756d?: NumericLike | null;
+
+  // Averages (from your DB screenshots)
+  avg_train_b?: NumericLike | null;
+  avg_lag_train_b?: NumericLike | null;
+  avg_ar1_corr_10d?: NumericLike | null;
+  avg_ar1_corr_20d?: NumericLike | null;
+  avg_ar1_corr_60d?: NumericLike | null;
+  avg_sign_persist_20d?: NumericLike | null;
+  avg_sign_persist_60d?: NumericLike | null;
+  avg_ret_1d?: NumericLike | null;
+  avg_ret_5d?: NumericLike | null;
+  avg_ret_20d?: NumericLike | null;
+  avg_vol_63d?: NumericLike | null;
+  avg_vol_126d?: NumericLike | null;
+  avg_vol_252d?: NumericLike | null;
+  avg_vol_756d?: NumericLike | null;
+  avg_Z_ma_20d?: NumericLike | null;
+  avg_cs_rank_ret_1d?: NumericLike | null;
+  avg_cs_rank_ret_5d?: NumericLike | null;
+  avg_cs_rank_ret_20d?: NumericLike | null;
+  avg_cs_rank_z_ma_20d?: NumericLike | null;
+  avg_cs_rank_vol_63d?: NumericLike | null;
+  avg_cs_rank_vol_126d?: NumericLike | null;
+  avg_cs_rank_vol_252d?: NumericLike | null;
+  avg_cs_rank_vol_756d?: NumericLike | null;
+
+  /** Future-proof fallbacks */
+  [key: `coef_${string}`]: NumericLike | null | undefined;
+  [key: `avg_${string}`]: NumericLike | null | undefined;
+};
+
+
+type Entry = [string, unknown];
+
+const isFiniteNumber = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v);
+
+// Guard for coef_* entries with numeric values
+function isCoefEntryNumber(e: Entry): e is [string, number] {
+  return e[0].startsWith("coef_") && isFiniteNumber(e[1]);
+}
+
+// Optional: a safe formatter for tiny numbers
+function fmtNum(v: unknown) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "N/A";
+  const a = Math.abs(n);
+  if (a > 0 && a < 1e-4) return n.toExponential(2);
+  return n.toFixed(4);
+}
+// Pretty-print keys like "avg_cs_rank_vol_126d" → "Average cs rank vol 126d"
+const prettyKey = (k: string) =>
+  k
+    .replace(/^avg_/, "Average ")
+    .replace(/^coef_/, "Coefficient ")
+    .replace(/_/g, " ");
+
+const EPS = 1e-12;
+const isNonZero = (v: unknown) =>
+  Number.isFinite(Number(v)) && Math.abs(Number(v as number)) > EPS;
+
+/** Type guard to narrow unknown → number */
+// const isFiniteNumber = (v: unknown): v is number =>
+//   typeof v === "number" && Number.isFinite(v);
+
 export function BetaDashboard() {
   const [summaryData, setSummaryData] = useState<BetaSummary[]>([]);
   const [timeSeriesData, setTimeSeriesData] = useState<BetaTimeSeriesData | null>(null);
-  const [selectedTicker, setSelectedTicker] = useState<string>('');
+  const [selectedTicker, setSelectedTicker] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [timeSeriesLoading, setTimeSeriesLoading] = useState(false);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<string>("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [sharedStats, setSharedStats] = useState<SharedStats | null>(null);
+  const [showMore, setShowMore] = useState(false);
 
-  // API base URL - adjust based on your backend configuration
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+  // Modal state
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  /** Load shared/global factor stats */
+  useEffect(() => {
+    fetch(api("/api/factors/shared/"))
+      .then((res) => res.json())
+      .then(setSharedStats)
+      .catch(() => {
+        /* silently ignore */
+      });
+  }, []);
+
+  /** Summary fetch */
   const fetchSummaryData = async () => {
     setLoading(true);
-    setError('');
-    
+    setError("");
+
     try {
-      const response = await fetch(`${API_BASE}/api/beta/summary/`, {
-        credentials: 'include',
+      const response = await fetch(api("/api/factors/summary/"), {
+        credentials: "include",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
       });
 
@@ -63,81 +197,83 @@ export function BetaDashboard() {
       setSummaryData(data.summary || []);
       setLastUpdated(new Date());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch summary data');
-      console.error('Error fetching summary data:', err);
+      setError(err instanceof Error ? err.message : "Failed to fetch summary data");
+      console.error("Error fetching summary data:", err);
     } finally {
       setLoading(false);
     }
   };
 
+  /** Time series fetch with safe encoding and gentle fallbacks for slashy tickers */
   const fetchTimeSeriesData = async (ticker: string) => {
     if (!ticker) return;
-    
     setTimeSeriesLoading(true);
-    
-    try {
-      const response = await fetch(`${API_BASE}/api/beta/timeseries/${ticker}/`, {
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+    setError("");
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch time series data: ${response.statusText}`);
+    const tryFetch = async (symbol: string) => {
+      const url = api(`/api/beta/timeseries/${seg(symbol)}/`);
+      return fetch(url, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    try {
+      // Primary attempt with raw ticker (encoded)
+      let res = await tryFetch(ticker);
+
+      // If not found and ticker contains slash, try common aliases
+      if (res.status === 404 && ticker.includes("/")) {
+        // 1) Replace slash with hyphen (e.g., BRK/B UN -> BRK-B UN)
+        const aliasDash = ticker.replace(/\//g, "-").trim();
+        res = await tryFetch(aliasDash);
+
+        // 2) If still not found, drop the slash entirely (e.g., BRK/B UN -> BRKB UN)
+        if (res.status === 404) {
+          const aliasNoSlash = ticker.replace(/\//g, "").trim();
+          res = await tryFetch(aliasNoSlash);
+        }
       }
 
-      const data = await response.json();
+      if (!res.ok) {
+        // At this point, we surface a clear error for the modal
+        const msg = `Failed to fetch time series data: ${res.status} ${res.statusText}`;
+        setTimeSeriesData(null);
+        throw new Error(msg);
+      }
+
+      const data = (await res.json()) as BetaTimeSeriesData;
       setTimeSeriesData(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch time series data');
-      console.error('Error fetching time series data:', err);
+      setError(err instanceof Error ? err.message : "Failed to fetch time series data");
+      console.error("Error fetching time series data:", err);
     } finally {
       setTimeSeriesLoading(false);
     }
   };
 
+  /** Handle ticker click: open modal and fetch its series */
   const handleTickerSelect = (ticker: string) => {
     setSelectedTicker(ticker);
+    setIsDialogOpen(true);
+    setTimeSeriesData(null); // reset previous chart data while loading
     fetchTimeSeriesData(ticker);
-  };
-
-  const handleImportData = async () => {
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${API_BASE}/api/beta/import/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to import data: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      
-      // Refresh summary data after import
-      await fetchSummaryData();
-      
-      // Show success message (you might want to use a toast notification here)
-      console.log('Import successful:', result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to import data');
-      console.error('Error importing data:', err);
-    } finally {
-      setLoading(false);
-    }
   };
 
   // Load summary data on component mount
   useEffect(() => {
     fetchSummaryData();
   }, []);
+
+  // Close dialog handler
+  const handleDialogOpenChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) {
+      // Optional: keep selection for context, or clear here.
+      // setSelectedTicker("");
+      // setTimeSeriesData(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -149,30 +285,14 @@ export function BetaDashboard() {
             Monitor and analyze beta coefficient predictions across your stock portfolio
           </p>
           {lastUpdated && (
-            <p className="text-sm text-gray-500 mt-1">
-              Last updated: {lastUpdated.toLocaleString()}
-            </p>
+            <p className="text-sm text-gray-500 mt-1">Last updated: {lastUpdated.toLocaleString()}</p>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={fetchSummaryData}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+          {sharedStats && (
+          <Button variant="outline" size="sm" onClick={() => setShowMore((s) => !s)}>
+            {showMore ? "Show less" : "Show more"}
           </Button>
-          <Button
-            onClick={handleImportData}
-            disabled={loading}
-            className="flex items-center gap-2"
-          >
-            <Download className="h-4 w-4" />
-            Import Latest Data
-          </Button>
-        </div>
+)}
       </div>
 
       {/* Error Alert */}
@@ -183,105 +303,191 @@ export function BetaDashboard() {
         </Alert>
       )}
 
-      {/* Main Content */}
-      <Tabs defaultValue="summary" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="summary">Summary Table</TabsTrigger>
-          <TabsTrigger value="timeseries" disabled={!selectedTicker}>
-            Time Series {selectedTicker && `(${selectedTicker})`}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="summary" className="space-y-4">
-          <BetaSummaryTable
-            data={summaryData}
-            loading={loading}
-            onTickerSelect={handleTickerSelect}
-          />
-        </TabsContent>
-
-        <TabsContent value="timeseries" className="space-y-4">
-          {selectedTicker ? (
-            <BetaTimeSeriesChart
-              data={timeSeriesData}
-              loading={timeSeriesLoading}
-            />
-          ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>Time Series Analysis</CardTitle>
-                <CardDescription>
-                  Select a ticker from the summary table to view detailed time series analysis
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-center h-48 text-gray-500">
-                  No ticker selected
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* Stats Cards */}
-      {summaryData.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Global Factor Stats Cards */}
+      {sharedStats && (
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          {/* Global R² */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total Stocks</CardTitle>
+              <CardTitle className="text-sm font-medium">Global R² Score</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{summaryData.length}</div>
-              <p className="text-xs text-muted-foreground">
-                Active predictions
-              </p>
+              <div className="text-2xl font-bold">{sharedStats.r2_global?.toFixed(4) ?? "N/A"}</div>
+              <p className="text-xs text-muted-foreground">Model fit quality across all tickers</p>
             </CardContent>
           </Card>
-          
+
+          {/* Volatility Coefficient */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">High Confidence</CardTitle>
+              <CardTitle className="text-sm font-medium">Volatility Coefficient</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {summaryData.filter(s => s.confidence_level === 'High').length}
+                {sharedStats.volatility_coeff?.toFixed(4) ?? "N/A"}
               </div>
-              <p className="text-xs text-muted-foreground">
-                Strong predictions
-              </p>
+              <p className="text-xs text-muted-foreground">ElasticNet intercept term for volatility</p>
             </CardContent>
           </Card>
-          
+
+          {/* Y-Intercept */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Avg R² Score</CardTitle>
+              <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {(summaryData.reduce((sum, s) => sum + s.avg_r2_ols, 0) / summaryData.length).toFixed(3)}
-              </div>
+              <div className="text-2xl font-bold">{sharedStats.y_intercept?.toFixed(3) ?? "N/A"}</div>
               <p className="text-xs text-muted-foreground">
-                Model fit quality
+                Model baseline term (average intercept across all tickers)
               </p>
             </CardContent>
           </Card>
-          
+
+          {/* Strongest Positive Coefficient */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total Forecasts</CardTitle>
+              <CardTitle className="text-sm font-medium">Top Positive Factor</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {summaryData.reduce((sum, s) => sum + s.forecast_count, 0).toLocaleString()}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Historical predictions
-              </p>
+              {(() => {
+                const coefEntries = Object.entries(sharedStats ?? {}).filter(
+                  (e): e is [string, number] => e[0].startsWith("coef_") && isFiniteNumber(e[1])
+                );
+                if (coefEntries.length === 0) {
+                  return <div className="text-sm text-gray-500">N/A</div>;
+                }
+                const top = [...coefEntries].sort((a, b) => b[1] - a[1])[0];
+                return (
+                  <>
+                    <div className="text-2xl font-bold">{top[0].replace("coef_", "")}</div>
+                    <p className="text-xs text-muted-foreground">Weight: {top[1].toFixed(4)}</p>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
+
+          {/* Strongest Negative Coefficient */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Top Negative Factor</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const coefEntries = Object.entries(sharedStats ?? {}).filter(
+                  (e): e is [string, number] => e[0].startsWith("coef_") && isFiniteNumber(e[1])
+                );
+                if (coefEntries.length === 0) {
+                  return <div className="text-sm text-gray-500">N/A</div>;
+                }
+                const bottom = [...coefEntries].sort((a, b) => a[1] - b[1])[0];
+                return (
+                  <>
+                    <div className="text-2xl font-bold">{bottom[0].replace("coef_", "")}</div>
+                    <p className="text-xs text-muted-foreground">Weight: {bottom[1].toFixed(4)}</p>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          
+
         </div>
       )}
+
+      
+      {/* Collapsible metrics */}
+      {showMore && sharedStats && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 auto-rows-fr">
+          {(() => {
+            // find top positive / negative coefficient keys to exclude
+            const coefPairs = Object.entries(sharedStats).filter(
+              ([k, v]) => k.startsWith("coef_") && isNonZero(v)
+            ) as [string, number][];
+          
+
+            const topPos = coefPairs.length
+              ? [...coefPairs].sort((a, b) => b[1] - a[1])[0][0] // key only
+              : null;
+
+            const topNeg = coefPairs.length
+              ? [...coefPairs].sort((a, b) => a[1] - b[1])[0][0]
+              : null;
+
+            const exclude = new Set<string>([
+              "r2_global",
+              "volatility_coeff",
+              "y_intercept",
+              topPos ?? "",
+              topNeg ?? "",
+            ]);
+
+            // collect the rest: all avg_* and coef_* remaining
+            const rest = Object.entries(sharedStats)
+              .filter(([k, v]) => (k.startsWith("avg_") || k.startsWith("coef_")) && !exclude.has(k))
+                .filter(([, v]) => isNonZero(v))   // hide zeros
+              .sort(([a], [b]) => a.localeCompare(b)); // simple stable order
+
+            return rest.map(([k, v]) => (
+              <Card key={k} className="w-full min-w-0">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium truncate">{prettyKey(k)}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold break-words">{fmtNum(v)}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {k.startsWith("avg_") ? "Cross-universe average" : "Model coefficient"}
+                  </p>
+                </CardContent>
+              </Card>
+            ));
+          })()}
+        </div>
+      )}
+
+
+      {/* Summary Table (clicking a ticker opens the dialog) */}
+      <BetaSummaryTable data={summaryData} loading={loading} onTickerSelect={handleTickerSelect} />
+
+      {/* Time Series Modal */}
+      <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="sm:max-w-[1200px] w-[95vw]">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedTicker ? `Time Series — ${selectedTicker}` : "Time Series"}
+            </DialogTitle>
+            <DialogDescription>
+              Historical and predicted beta with confidence bands.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-2">
+            {timeSeriesLoading ? (
+              <div className="h-64 flex items-center justify-center text-muted-foreground">
+                Loading…
+              </div>
+            ) : timeSeriesData ? (
+              <BetaTimeSeriesChart data={timeSeriesData} loading={false} />
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center text-center text-muted-foreground">
+                <div className="mb-2">No time series data available for this ticker.</div>
+                <div className="text-xs">
+                  If the symbol contains a slash (e.g., BRK/B), it may require an alias on the
+                  backend (e.g., BRK-B or BRKB).
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-4">
+            <DialogClose asChild>
+              <Button variant="outline">Close</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

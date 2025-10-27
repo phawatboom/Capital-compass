@@ -1,3 +1,11 @@
+// "use client";
+
+// import CompleteBetaAnalysisPage from './complete/page';
+
+// export default function BetaPage() {
+//   return <CompleteBetaAnalysisPage />;
+// }
+
 "use client";
 
 import { BetaDashboard } from '@/components/beta/BetaDashboard';
