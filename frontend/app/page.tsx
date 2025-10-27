@@ -11,7 +11,7 @@ export default function HomePage() {
         <div className="container mx-auto text-center max-w-4xl">
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
             Beta Forecasting with
-            <span className="text-blue-500"> Model</span>
+            <span className="text-[#9ba578]"> Model</span>
           </h1>
           <p className="text-lg text-gray-600 mb-2 leading-relaxed">
             Our model captures how each stock’s short-term behavior shifts relative to its peers and market volatility, using advanced ElasticNet regression to forecast next-period β values across multiple horizons, revealing the real-time balance between mean reversion and momentum.
@@ -53,7 +53,7 @@ export default function HomePage() {
           <div className="grid md:grid-cols-3 gap-8">
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <Zap className="h-12 w-12 text-blue-500 mb-4" />
+                <Zap className="h-12 w-12 text-[#a5a053] mb-4" />
                 <CardTitle>Market-Wide Learning</CardTitle>
               </CardHeader>
               <CardContent>
@@ -65,7 +65,7 @@ export default function HomePage() {
 
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <Shield className="h-12 w-12 text-purple-500 mb-4" />
+                <Shield className="h-12 w-12 text-[#999a67] mb-4" />
                 <CardTitle>Pooled Intelligence</CardTitle>
               </CardHeader>
               <CardContent>
@@ -78,7 +78,7 @@ export default function HomePage() {
 
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <TrendingUp className="h-12 w-12 text-green-500 mb-4" />
+                <TrendingUp className="h-12 w-12 text-[#B39B5B]  mb-4" />
                 <CardTitle>Performance Outcomes</CardTitle>
               </CardHeader>
               <CardContent>
