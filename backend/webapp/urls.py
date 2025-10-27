@@ -4,6 +4,7 @@ from django.conf import settings
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    upload_status,
     FileUploadView,
     stock_list,
     stock_details,
@@ -64,7 +65,8 @@ router.register(r'analysis-runs', AnalysisRunViewSet, basename='analysis-run')
 
 urlpatterns = [
     # Data & files
-    path('upload-csv/', FileUploadView.as_view(), name='upload-csv'),
+    path("upload-csv/", FileUploadView.as_view(), name="upload-csv"),
+    path("uploads/<int:pk>/status/", upload_status, name="upload-status"),
     path('stocks/', stock_list, name='stock-list'),
     path('stocks/<int:pk>/', stock_details, name='stock-details'),
     path('csv-uploads/', list_csv_uploads, name='list-csv-uploads'),

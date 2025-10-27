@@ -10,6 +10,8 @@ import numpy as np
 from django.db import transaction
 from django.conf import settings
 import glob
+import threading
+
 
 
 from pathlib import Path
@@ -50,6 +52,34 @@ def _safe_create(model_cls, payload: dict):
     fields = _model_field_names(model_cls)
     clean = {k: v for k, v in payload.items() if k in fields}
     return model_cls.objects.create(**clean)
+
+
+# ---- Minimal progress tracking on disk ----
+PROGRESS_DIR = Path(settings.MEDIA_ROOT) / "upload_progress"
+PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
+
+def _progress_path(upload_id: int) -> Path:
+    return PROGRESS_DIR / f"{upload_id}.json"
+
+def _write_progress(upload_id: int, payload: dict) -> None:
+    p = _progress_path(upload_id)
+    tmp = p.with_suffix(".tmp")
+    payload = {**payload, "updated_at": timezone.now().isoformat()}
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+def _read_progress(upload_id: int) -> dict | None:
+    p = _progress_path(upload_id)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 
 # ================= New / Refactored Analysis Views (synchronous execution) ================= #
 
@@ -499,162 +529,234 @@ def process_data(df, file, data_type, upload_record):
 # --------------------------------------------------------------------------------------
 class FileUploadView(APIView):
     parser_classes = (MultiPartParser, FormParser)
-    permission_classes = [IsAuthenticated]  # ensure user is logged in
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         file_obj = request.data.get('file')
         if not file_obj:
             return Response({'error': 'No file was provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Associate upload with the current logged-in user
         serializer = CSVUploadSerializer(data={'filename': file_obj})
-        if serializer.is_valid():
-            upload_record = None
-            try:
-                upload_record = serializer.save(user=request.user)  # <-- FIX: set the user
-                file_path = upload_record.filename.path
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-                if file_path.endswith('.xlsx'):
-                    # Use model-style reading logic for Excel
-                    with pd.ExcelFile(file_path) as xls:
-                        if "Returns" not in xls.sheet_names:
-                            raise ValueError("No 'Returns' sheet found in Excel file.")
+        upload_record = serializer.save(user=request.user)
+        upload_id = upload_record.id
 
-                        df = pd.read_excel(xls, sheet_name="Returns", header=None)
+        # Seed progress as queued so frontend can poll immediately
+        try:
+            _write_progress(upload_id, {
+                "status": "processing",
+                "stage": "Queued",
+                "progress": 1,
+                "filename": os.path.basename(upload_record.filename.name),
+                "file_size": getattr(upload_record, "file_size", file_obj.size if hasattr(file_obj, "size") else None)
+            })
+        except Exception:
+            pass
 
-                        # --- Detect header row containing "Date" ---
-                        header_row = None
-                        for i in range(min(50, len(df))):
-                            if df.iloc[i].astype(str).str.lower().eq("date").any():
-                                header_row = i
-                                break
-                        if header_row is None:
-                            raise ValueError("No header row containing 'Date' found in sheet.")
+        # Kick off background processing (was previously inline here)
+        threading.Thread(
+            target=_process_upload_background,
+            args=(upload_id,),
+            daemon=True
+        ).start()
 
-                        # --- Assign columns and clean data ---
-                        cols = df.iloc[header_row].astype(str).str.strip().tolist()
-                        data_df = df.iloc[header_row + 1:].copy()
-                        data_df.columns = cols
-                        data_df = data_df.loc[:, ~(data_df.isna().all())]
+        # Return fast with the id + status URL for polling
+        return Response({
+            'message': 'File received; processing has started.',
+            'upload_id': upload_id,
+            'status_url': f'/uploads/{upload_id}/status/'
+        }, status=status.HTTP_201_CREATED)
 
-                        # Ensure 'Date' column is properly parsed
-                        date_col = next((c for c in data_df.columns if str(c).strip().lower() == "date"), None)
-                        if not date_col:
-                            raise ValueError("No 'Date' column found in sheet.")
-                        if date_col != "Date":
-                            data_df = data_df.rename(columns={date_col: "Date"})
 
-                        data_df["Date"] = pd.to_datetime(data_df["Date"], errors="coerce")
-                        data_df = data_df.dropna(subset=["Date"])
 
-                        data_to_process = []
-                        data_type = "return"
 
-                        # --- Create Stock and StockData entries ---
-                        stock_names = [c for c in data_df.columns if c != "Date"]
-                        if not stock_names:
-                            raise ValueError("No stock columns found in sheet.")
+def _process_upload_background(upload_id: int):
+    """
+    Minimal background processor:
+      - Reuses existing Excel/CSV logic from FileUploadView
+      - Updates a small JSON progress file for polling
+    """
+    try:
+        upload_record = CSVUploadRecord.objects.get(pk=upload_id)
+        file_path = upload_record.filename.path
+        filename = os.path.basename(upload_record.filename.name)
+        file_size = getattr(upload_record, "file_size", None)
 
-                        # Bulk get_or_create for stocks
-                        stocks_map = {name.strip(): Stock.objects.get_or_create(name=name.strip())[0] for name in
-                                      stock_names}
+        _write_progress(upload_id, {
+            "status": "processing",
+            "stage": "Validating file",
+            "progress": 3,
+            "filename": filename,
+            "file_size": file_size,
+        })
 
-                        # Collect data points (similar structure to what process_data uses)
-                        for stock_name in stock_names:
-                            stock_obj = stocks_map[stock_name]
-                            for _, row in data_df.iterrows():
-                                val = row[stock_name]
-                                if pd.isna(val):
-                                    continue
+        # ---- Excel branch (copied from your FileUploadView with tiny tweaks) ----
+        if file_path.endswith(".xlsx"):
+            _write_progress(upload_id, {
+                "status": "processing", "stage": "Reading Excel", "progress": 8
+            })
 
-                                data_to_process.append({
-                                    'stock': stock_obj,
-                                    'date': row["Date"].date(),
-                                    'data_type': data_type,
-                                    'value': float(val),
-                                })
+            with pd.ExcelFile(file_path) as xls:
+                if "Returns" not in xls.sheet_names:
+                    raise ValueError("No 'Returns' sheet found in Excel file.")
 
-                        # --- Start Upsert Logic ---
+                df = pd.read_excel(xls, sheet_name="Returns", header=None)
 
-                        # 1. Get existing records in a single query (Only query for the relevant stock/date/data_type)
-                        existing_records_filter = {
-                            'stock__in': [d['stock'] for d in data_to_process],
-                            'data_type': data_type,
-                            'date__in': [d['date'] for d in data_to_process]
-                        }
-                        existing_records = StockData.objects.filter(**existing_records_filter).values('stock_id',
-                                                                                                      'date',
-                                                                                                      'data_type', 'id')
+                # Detect header row containing "Date"
+                header_row = None
+                for i in range(min(50, len(df))):
+                    if df.iloc[i].astype(str).str.lower().eq("date").any():
+                        header_row = i
+                        break
+                if header_row is None:
+                    raise ValueError("No header row containing 'Date' found in sheet.")
 
-                        # Create a map for fast lookup: (stock_id, date, data_type) -> id
-                        existing_records_map = {
-                            (rec['stock_id'], rec['date'], rec['data_type']): rec['id']
-                            for rec in existing_records
-                        }
+                cols = df.iloc[header_row].astype(str).str.strip().tolist()
+                data_df = df.iloc[header_row + 1:].copy()
+                data_df.columns = cols
+                data_df = data_df.loc[:, ~(data_df.isna().all())]
 
-                        # 2. Separate into lists for creation and update
-                        records_to_create = []
-                        records_to_update = []
+                date_col = next((c for c in data_df.columns if str(c).strip().lower() == "date"), None)
+                if not date_col:
+                    raise ValueError("No 'Date' column found in sheet.")
+                if date_col != "Date":
+                    data_df = data_df.rename(columns={date_col: "Date"})
 
-                        for data_point in data_to_process:
-                            stock_id = data_point['stock'].id
-                            date_val = data_point['date']
-                            data_type_val = data_point['data_type']
+                _write_progress(upload_id, {
+                    "status": "processing", "stage": "Parsing dates", "progress": 12
+                })
 
-                            key = (stock_id, date_val, data_type_val)
+                data_df["Date"] = pd.to_datetime(data_df["Date"], errors="coerce")
+                data_df = data_df.dropna(subset=["Date"])
 
-                            if key in existing_records_map:
-                                record_id = existing_records_map[key]
-                                records_to_update.append(
-                                    StockData(
-                                        id=record_id,
-                                        **data_point  # Pass all fields including stock, date, data_type, and value
-                                    )
-                                )
+                data_type = "return"
+                stock_names = [c for c in data_df.columns if c != "Date"]
+                if not stock_names:
+                    raise ValueError("No stock columns found in sheet.")
+
+                _write_progress(upload_id, {
+                    "status": "processing",
+                    "stage": "Preparing symbols",
+                    "progress": 18,
+                    "tickers": len(stock_names),
+                    "rows_total": int(len(data_df))
+                })
+
+                stocks_map = {name.strip(): Stock.objects.get_or_create(name=name.strip())[0]
+                              for name in stock_names}
+
+                # Collect datapoints
+                data_to_process = []
+                # progress in chunks
+                total_rows = len(data_df)
+                chunk_size = max(1000, total_rows // 20 or 1)
+                rows_done = 0
+
+                for start in range(0, total_rows, chunk_size):
+                    end = min(start + chunk_size, total_rows)
+                    block = data_df.iloc[start:end]
+                    for _, row in block.iterrows():
+                        d = row["Date"].date()
+                        for sn in stock_names:
+                            v = row[sn]
+                            if pd.isna(v):
+                                continue
+                            try:
+                                v = float(v)
+                            except Exception:
+                                continue
+                            data_to_process.append({
+                                "stock": stocks_map[sn],
+                                "date": d,
+                                "data_type": data_type,
+                                "value": v,
+                            })
+
+                    # Upsert for this block
+                    if data_to_process:
+                        existing = StockData.objects.filter(
+                            stock__in=[d["stock"] for d in data_to_process],
+                            data_type=data_type,
+                            date__in=[d["date"] for d in data_to_process]
+                        ).values("stock_id", "date", "data_type", "id")
+                        idx = {(e["stock_id"], e["date"], e["data_type"]): e["id"] for e in existing}
+
+                        to_create, to_update = [], []
+                        for dp in data_to_process:
+                            key = (dp["stock"].id, dp["date"], dp["data_type"])
+                            if key in idx:
+                                to_update.append(StockData(id=idx[key], **dp))
                             else:
-                                records_to_create.append(StockData(**data_point))
+                                to_create.append(StockData(**dp))
 
-                        # 3. Perform bulk operations
-                        if records_to_create:
-                            StockData.objects.bulk_create(records_to_create, batch_size=5000)
+                        if to_create:
+                            StockData.objects.bulk_create(to_create, batch_size=5000)
+                        if to_update:
+                            StockData.objects.bulk_update(to_update, ["value"], batch_size=5000)
 
-                        if records_to_update:
-                            # Only update the 'value' field
-                            StockData.objects.bulk_update(records_to_update, ['value'], batch_size=5000)
+                        data_to_process.clear()
 
-                        print(
-                            f"Successfully imported {len(records_to_create)} new and updated {len(records_to_update)} stock return records from XLSX.")
+                    rows_done = end
+                    pct = 18 + int(72 * (rows_done / max(total_rows, 1)))  # 18..90
+                    _write_progress(upload_id, {
+                        "status": "processing",
+                        "stage": "Writing to database",
+                        "progress": min(pct, 90),
+                        "rows_done": int(rows_done),
+                        "rows_total": int(total_rows)
+                    })
 
-                elif file_path.endswith('.csv'):
-                    df = pd.read_csv(file_path, header=None)
-                    # Determine data_type based on filename
-                    if 'prices' in file_obj.name.lower():
-                        data_type = 'price'
-                    elif 'returns' or 'mxus_data' in file_obj.name.lower():
-                        data_type = 'return'
-                    elif 'bql_query' or 'equity' in file_obj.name.lower():
-                        data_type = 'equity'
-                    else:
-                        raise ValueError("Could not determine data type from CSV filename.")
+        # ---- CSV branch (reuses your process_data) ----
+        elif file_path.endswith(".csv"):
+            name_lower = upload_record.filename.name.lower()
+            if "prices" in name_lower:
+                data_type = "price"
+            elif "equity" in name_lower or "bql_query" in name_lower:
+                data_type = "equity"
+            else:
+                data_type = "return"
 
-                    process_data(df, file_obj, data_type, upload_record)
+            _write_progress(upload_id, {
+                "status": "processing", "stage": "Reading CSV", "progress": 10, "data_type": data_type
+            })
 
-                else:
-                    raise ValueError("Unsupported file format.")
+            df = pd.read_csv(file_path, header=None)
+            # Your existing helper will do the heavy lifting
+            process_data(df, upload_record.filename, data_type, upload_record)
 
-                return Response({'message': 'File uploaded and processed successfully.'},
-                                status=status.HTTP_201_CREATED)
-
-            except Exception as e:
-                # Cleanup if processing fails
-                if upload_record:
-                    if os.path.exists(upload_record.filename.path):
-                        os.remove(upload_record.filename.path)
-                    upload_record.delete()
-                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            _write_progress(upload_id, {
+                "status": "processing", "stage": "Finalizing", "progress": 95
+            })
 
         else:
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            raise ValueError("Unsupported file format.")
+
+        _write_progress(upload_id, {
+            "status": "completed", "stage": "Complete", "progress": 100
+        })
+
+    except Exception as e:
+        logger.exception("Upload processing failed")
+        _write_progress(upload_id, {
+            "status": "failed", "stage": "Error", "progress": 100, "error": str(e)
+        })
+
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def upload_status(request, pk: int):
+    try:
+        # ensure ownership
+        CSVUploadRecord.objects.get(pk=pk, user=request.user)
+    except CSVUploadRecord.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    prog = _read_progress(pk) or {}
+    return Response(prog or {"status": "unknown"}, status=200)
+
 
 
 # List all stocks.

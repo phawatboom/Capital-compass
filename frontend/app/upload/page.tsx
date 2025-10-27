@@ -1,51 +1,92 @@
 "use client";
 
 import type React from "react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/app/lib/api";
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, Loader2 } from "lucide-react";
+import type { AxiosProgressEvent } from "axios";
+import {
+  Upload,
+  FileSpreadsheet,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 
-/**
- * Configure your API base:
- * - Create .env.local with: NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
- * - In production, point this to your deployed backend.
- */
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
+type Phase = "idle" | "uploading" | "processing" | "done" | "error";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+
+  // phase & messaging
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // upload metrics
+  const [uploadPct, setUploadPct] = useState(0);
+  const [bytesUploaded, setBytesUploaded] = useState(0);
+  const [speedMbps, setSpeedMbps] = useState<number | null>(null);
+  const [etaSec, setEtaSec] = useState<number | null>(null);
+  const [uploadDone, setUploadDone] = useState(false);
+
+  // server processing (real, from /uploads/:id/status/)
+  const [statusUrl, setStatusUrl] = useState<string | null>(null);
+  const [procPct, setProcPct] = useState(0);
+  const [procStage, setProcStage] = useState("Queued…");
+
   const router = useRouter();
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
-    if (selectedFile) {
-      const validTypes = ["text/csv", "application/vnd.ms-excel"];
-      if (
-        !validTypes.includes(selectedFile.type) &&
-        !selectedFile.name.toLowerCase().endsWith(".csv") &&
-        !selectedFile.name.toLowerCase().endsWith(".xlsx")
-      ) {
-        setError("Please upload a CSV or Excel file (.csv, .xlsx)");
-        setFile(null);
-        return;
-      }
-      if (selectedFile.size > 200 * 1024 * 1024) {
-        setError("File size must be less than 200MB");
-        setFile(null);
-        return;
-      }
-      setError(null);
-      setFile(selectedFile);
+    if (!selectedFile) return;
+
+    const validByExt =
+      selectedFile.name.toLowerCase().endsWith(".xlsx") ||
+      selectedFile.name.toLowerCase().endsWith(".csv");
+    const validByMime =
+      ["text/csv", "application/vnd.ms-excel"].includes(selectedFile.type) ||
+      selectedFile.type ===
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    if (!validByExt && !validByMime) {
+      setError("Please upload a CSV or Excel file (.csv, .xlsx)");
+      setFile(null);
+      return;
     }
+    if (selectedFile.size > 200 * 1024 * 1024) {
+      setError("File size must be less than 200MB");
+      setFile(null);
+      return;
+    }
+
+    // reset state
+    setError(null);
+    setSuccessMsg(null);
+    setPhase("idle");
+    setFile(selectedFile);
+    setUploadPct(0);
+    setBytesUploaded(0);
+    setSpeedMbps(null);
+    setEtaSec(null);
+    setUploadDone(false);
+
+    // processing state
+    setStatusUrl(null);
+    setProcPct(0);
+    setProcStage("Queued…");
   }, []);
 
   const handleDrop = useCallback(
@@ -53,7 +94,9 @@ export default function UploadPage() {
       event.preventDefault();
       const droppedFile = event.dataTransfer.files?.[0];
       if (!droppedFile) return;
-      const synthetic = { target: { files: [droppedFile] } } as unknown as React.ChangeEvent<HTMLInputElement>;
+      const synthetic = {
+        target: { files: [droppedFile] },
+      } as unknown as React.ChangeEvent<HTMLInputElement>;
       handleFileSelect(synthetic);
     },
     [handleFileSelect]
@@ -63,62 +106,159 @@ export default function UploadPage() {
     event.preventDefault();
   }, []);
 
+  // Poll backend status while processing
+  useEffect(() => {
+    if (phase !== "processing" || !statusUrl) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.get(statusUrl, { withCredentials: true });
+        if (cancelled) return;
+
+        const s = res.data || {};
+        if (typeof s.progress === "number") setProcPct(s.progress);
+        if (typeof s.stage === "string") setProcStage(s.stage);
+
+        if (s.status === "completed") {
+          setProcPct(100);
+          setProcStage("Completed");
+          setPhase("done");
+          setSuccessMsg("File processed successfully.");
+          clearInterval(interval);
+        } else if (s.status === "failed") {
+          setError(s.error || "Server processing failed.");
+          setPhase("error");
+          clearInterval(interval);
+        }
+      } catch (err: any) {
+        // transient polling errors shouldn't nuke the UI; keep polling
+      }
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [phase, statusUrl]);
+
   const handleUpload = async () => {
     if (!file) return;
-    setUploading(true);
-    setUploadProgress(0);
+
+    setPhase("uploading");
+    setUploadPct(0);
+    setBytesUploaded(0);
+    setSpeedMbps(null);
+    setEtaSec(null);
+    setUploadDone(false);
     setError(null);
     setSuccessMsg(null);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const formData = new FormData();
     formData.append("file", file);
 
+    // for speed/eta sampling
+    let lastTime = performance.now();
+    let lastLoaded = 0;
+
     try {
-      const res = await api.post(
-        `/upload-csv/`,
-        formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-          onUploadProgress: (evt) => {
-            if (!evt.total) return;
-            const pct = Math.round((evt.loaded / evt.total) * 80); // 0–80% = network upload
-            setUploadProgress(pct);
-          },
-        }
-      );
+      const res = await api.post(`/upload-csv/`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        withCredentials: true,
+        signal: controller.signal as unknown as AbortSignal,
+        onUploadProgress: (evt: AxiosProgressEvent) => {
+          const ratio =
+            typeof evt.progress === "number"
+              ? evt.progress
+              : evt.total
+              ? (evt.loaded ?? 0) / evt.total
+              : null;
 
-      // Simulate processing completion to 100%
-      setUploadProgress(100);
+          if (ratio !== null) {
+            const pct = Math.min(100, Math.max(0, Math.round(ratio * 100)));
+            setUploadPct(pct);
+            setBytesUploaded(evt.loaded ?? 0);
 
-      // Backend returns { message, upload: { id, filename, uploaded_at } }
-      const msg = res.data?.message ?? "CSV Uploaded Successfully";
-      const uploadId = res.data?.upload?.id;
+            const now = performance.now();
+            const dt = Math.max(1, now - lastTime);
+            const dBytes = Math.max(0, (evt.loaded ?? 0) - lastLoaded);
+            const bytesPerSec = (dBytes / dt) * 1000;
+            const mbps = (bytesPerSec * 8) / (1024 * 1024);
+            const totalBytes = evt.total ?? file.size;
+            const bytesRemaining = totalBytes - (evt.loaded ?? 0);
+            const eta = bytesPerSec > 0 ? Math.round(bytesRemaining / bytesPerSec) : null;
 
-      setSuccessMsg(`${msg} - Universal Beta Forecasting Model will be used`);
+            setSpeedMbps(Number.isFinite(mbps) ? mbps : null);
+            setEtaSec(eta && Number.isFinite(eta) ? eta : null);
 
-      // Redirect after a short pause to the data page where analysis can be run
-      setTimeout(() => {
-        router.push("/data");
-      }, 600);
+            lastTime = now;
+            lastLoaded = evt.loaded ?? lastLoaded;
+
+            if (pct >= 100) setUploadDone(true);
+          }
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      // The server immediately returns { upload_id, status_url }
+      const status_url: string | undefined = res.data?.status_url;
+      if (!status_url) {
+        // Fallback: treat as done if backend didn’t give us a URL
+        setProcPct(100);
+        setProcStage("Completed");
+        setPhase("done");
+        setSuccessMsg(res.data?.message ?? "File uploaded successfully.");
+        return;
+      }
+
+      // Switch to processing and start polling
+      setStatusUrl(status_url);
+      setPhase("processing");
+      setProcStage("Queued…");
+      setProcPct((p) => (p > 1 ? p : 1));
     } catch (e: any) {
-      setUploading(false);
-      setUploadProgress(0);
-      const apiErr =
-        e?.response?.data?.error ||
-        (typeof e?.response?.data === "string" ? e.response.data : null) ||
-        e?.message ||
-        "Upload failed. Please try again.";
-      setError(apiErr);
+      if (controller.signal.aborted) {
+        setError("Upload canceled.");
+      } else {
+        const apiErr =
+          e?.response?.data?.error ||
+          (typeof e?.response?.data === "string" ? e.response.data : null) ||
+          e?.message ||
+          "Upload failed. Please try again.";
+        setError(apiErr);
+      }
+      setPhase("error");
+      setUploadPct(0);
+      setProcPct(0);
+    } finally {
+      abortRef.current = null;
+    }
+  };
+
+  const cancelUpload = () => {
+    if (phase === "uploading") {
+      abortRef.current?.abort();
     }
   };
 
   const formatFileSize = (bytes: number) => {
-      if (bytes === 0) return "0 B";
-      if (bytes < 1024) return `${bytes} B`;
-      if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-      if (bytes < 1024 ** 3) return `${(bytes / (1024 ** 2)).toFixed(2)} MB`;
-      return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
-    };
+    if (bytes === 0) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  };
+
+  const fmtEta = (s: number | null) => {
+    if (!s || s < 0) return "—";
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}m ${r}s`;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -126,16 +266,18 @@ export default function UploadPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Upload Your Data</h1>
           <p className="text-gray-600">
-            Upload your CSV file containing stock price data for Universal Beta Forecasting analysis
+            Upload your CSV/Excel file for Universal Beta Forecasting analysis.
           </p>
           <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
             <div className="flex items-center gap-2 mb-2">
               <FileSpreadsheet className="h-4 w-4 text-blue-600" />
-              <span className="text-sm font-medium text-blue-800">Universal Beta Forecasting Model</span>
+              <span className="text-sm font-medium text-blue-800">
+                Universal Beta Forecasting Model
+              </span>
             </div>
             <p className="text-sm text-blue-700">
-              Our latest Universal Beta Forecasting model provides comprehensive market risk analysis 
-              with cross-sectional features and conformal prediction intervals for superior accuracy.
+              We show separate progress for the network upload and server processing.
+              When the upload hits 100%, the file is on the server; processing continues until completed.
             </p>
           </div>
         </div>
@@ -148,161 +290,167 @@ export default function UploadPage() {
                 <CardTitle>File Upload</CardTitle>
                 <CardDescription>Drag and drop your file or click to browse</CardDescription>
               </CardHeader>
-            <CardContent>
-              <div
-                className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                  file ? "border-green-300 bg-green-50" : "border-gray-300 hover:border-gray-400"
-                }`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-              >
-                {file ? (
-                  <div className="space-y-4">
-                    <CheckCircle className="h-12 w-12 text-green-600 mx-auto" />
-                    <div>
-                      <p className="font-medium text-gray-900">{file.name}</p>
-                      <p className="text-sm text-gray-500">
-                        {(formatFileSize(file.size))}
-                      </p>
+              <CardContent>
+                <div
+                  className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                    file ? "border-green-300 bg-green-50" : "border-gray-300 hover:border-gray-400"
+                  }`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                >
+                  {file ? (
+                    <div className="space-y-4">
+                      <CheckCircle className="h-12 w-12 text-green-600 mx-auto" />
+                      <div>
+                        <p className="font-medium text-gray-900">{file.name}</p>
+                        <p className="text-sm text-gray-500">{formatFileSize(file.size)}</p>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <Upload className="h-12 w-12 text-gray-400 mx-auto" />
-                    <div>
-                      <p className="text-lg font-medium text-gray-900">Drop your file here</p>
-                      <p className="text-gray-500">or click to browse</p>
+                  ) : (
+                    <div className="space-y-4">
+                      <Upload className="h-12 w-12 text-gray-400 mx-auto" />
+                      <div>
+                        <p className="text-lg font-medium text-gray-900">Drop your file here</p>
+                        <p className="text-gray-500">or click to browse</p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Make the input clickable over the whole drop zone */}
-                <input
-                  type="file"
-                  accept=".csv,.xlsx"
-                  onChange={handleFileSelect}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  disabled={uploading}
-                />
-              </div>
-
-              {error && (
-                <Alert className="mt-4" variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              {successMsg && (
-                <Alert className="mt-4">
-                  <CheckCircle className="h-4 w-4" />
-                  <AlertDescription>{successMsg}</AlertDescription>
-                </Alert>
-              )}
-
-              {uploading && (
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Uploading and processing...</span>
-                    <span>{uploadProgress}%</span>
-                  </div>
-                  <Progress value={uploadProgress} />
+                  {/* Click-through input */}
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx"
+                    onChange={handleFileSelect}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    disabled={phase === "uploading" || phase === "processing"}
+                  />
                 </div>
-              )}
 
-              <Button onClick={handleUpload} disabled={!file || uploading} className="w-full mt-4" size="lg">
-                {uploading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  "Upload Data"
+                {error && (
+                  <Alert className="mt-4" variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
                 )}
-              </Button>
-            </CardContent>
-          </Card>
 
-          {/* Requirements Section */}
-          <Card>
+                {successMsg && (
+                  <Alert className="mt-4">
+                    <CheckCircle className="h-4 w-4" />
+                    <AlertDescription>{successMsg}</AlertDescription>
+                  </Alert>
+                )}
+
+                {(phase === "uploading" || phase === "processing") && (
+                  <div className="mt-4 space-y-4">
+                    {/* Upload progress (real) */}
+                    <div>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="flex items-center gap-2">
+                          Uploading to server
+                          {uploadDone && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                              Upload complete
+                            </span>
+                          )}
+                        </span>
+                        <span>{uploadPct}%</span>
+                      </div>
+                      <Progress value={uploadPct} />
+                      <div className="mt-1 text-xs text-gray-500">
+                        {bytesUploaded > 0 && file
+                          ? `${formatFileSize(bytesUploaded)} of ${formatFileSize(file.size)}`
+                          : null}
+                        {speedMbps ? ` • ${speedMbps!.toFixed(1)} Mb/s • ETA ${fmtEta(etaSec)}` : ""}
+                      </div>
+                    </div>
+
+                    {/* Processing progress (server-driven) */}
+                    {statusUrl && (
+                      <div>
+                        <div className="flex items-center justify-between text-sm mb-1">
+                          <span>Server processing</span>
+                          <span>{procPct}%</span>
+                        </div>
+                        <Progress value={procPct} />
+                        <div className="mt-1 text-xs text-gray-600">{procStage}</div>
+                        <div className="mt-1 text-[11px] text-gray-400">
+                          This step includes validating the sheet, parsing rows, and writing to the database.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2 mt-4">
+                  {phase !== "done" ? (
+                    <>
+                      <Button
+                        onClick={handleUpload}
+                        disabled={!file || phase === "uploading" || phase === "processing"}
+                        className="flex-1"
+                        size="lg"
+                      >
+                        {phase === "uploading" || phase === "processing" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {phase === "uploading" ? "Uploading…" : "Processing…"}
+                          </>
+                        ) : (
+                          "Upload Data"
+                        )}
+                      </Button>
+
+                      {(phase === "uploading") && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={cancelUpload}
+                          className="shrink-0"
+                        >
+                          <XCircle className="mr-2 h-4 w-4" />
+                          Cancel
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    <Button
+                      onClick={() => router.push("/data")}
+                      className="flex-1"
+                      size="lg"
+                    >
+                      Go to My Data
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Requirements (trimmed) */}
+            <Card>
               <CardHeader>
                 <CardTitle>File Requirements</CardTitle>
                 <CardDescription>
-                  Ensure your uploaded Excel file follows these requirements for successful analysis.
+                  Ensure your file follows these requirements for successful analysis.
                 </CardDescription>
               </CardHeader>
-
               <CardContent className="space-y-4">
-                {/* File Format */}
                 <div className="flex items-start space-x-3">
                   <FileSpreadsheet className="h-5 w-5 text-blue-600 mt-0.5" />
                   <div>
-                    <h3 className="font-medium">File Format</h3>
+                    <h3 className="font-medium">Format</h3>
                     <p className="text-sm text-gray-600">
-                       <strong>Excel only</strong> — <code>.xlsx</code> format (no <code>.csv</code> support yet)
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      The file must contain a sheet named <code>Returns</code>, which includes daily percentage or
-                      decimal returns for each stock.
+                      <strong>Excel (.xlsx)</strong> or <strong>CSV</strong>. If Excel, use a sheet named{" "}
+                      <code>Returns</code>.
                     </p>
                   </div>
                 </div>
-
-                {/* Expected Structure */}
                 <div className="flex items-start space-x-3">
                   <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
                   <div>
-                    <h3 className="font-medium">Expected Structure</h3>
-                    <p className="text-sm text-gray-600">
-                      The backend expects a <strong>wide-format Excel sheet</strong> where:
-                    </p>
-                    <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 mt-1">
-                      <li>The first column is <code>Date</code></li>
-                      <li>All other columns are ticker symbols (e.g. <code>AAPL</code>, <code>MSFT</code>, <code>GOOG</code>)</li>
-                      <li>Each cell contains the daily return for that ticker on that date</li>
-                    </ul>
+                    <h3 className="font-medium">Size</h3>
+                    <p className="text-sm text-gray-600">Max 200 MB</p>
                   </div>
-                </div>
-
-                {/* Data Requirements */}
-                <div className="flex items-start space-x-3">
-                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                  <div>
-                    <h3 className="font-medium">Data Requirements</h3>
-                    <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 mt-1">
-                      <li>Dates must be valid and parseable (e.g. <code>2020-01-02</code> or <code>30-Jul-2010</code>)</li>
-                      <li>Returns may be in decimals (e.g. <code>0.0123</code>) or percentages (e.g. <code>1.23%</code>) — both are supported</li>
-                      <li>No empty rows or columns</li>
-                      <li>Consistent ticker naming across all columns</li>
-                    </ul>
-                  </div>
-                </div>
-
-                {/* File Size */}
-                <div className="flex items-start space-x-3">
-                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                  <div>
-                    <h3 className="font-medium">File Size</h3>
-                    <p className="text-sm text-gray-600">
-                      Maximum <strong>200 MB</strong> per file
-                    </p>
-                  </div>
-                </div>
-
-                {/* Example Table */}
-                <div className="bg-blue-50 p-4 rounded-lg mt-6">
-                  <h3 className="font-medium text-blue-900 mb-2">Sample (wide format)</h3>
-                  <div className="text-xs font-mono bg-white p-2 rounded border overflow-x-auto">
-                    <div>Date,AAPL,MSFT,GOOG,AMZN</div>
-                    <div>2020-01-02,0.0123,0.0091,-0.0045,0.0150</div>
-                    <div>2020-01-03,-0.0056,0.0023,0.0082,-0.0011</div>
-                    <div>2020-01-06,0.0078,-0.0031,0.0114,0.0042</div>
-                    <div>...</div>
-                  </div>
-                  <p className="text-xs text-gray-600 mt-2">
-                    This is the required <strong>wide-format</strong> layout. Long-format support (date, ticker, return)
-                    may be added in a future update.
-                  </p>
                 </div>
               </CardContent>
             </Card>
