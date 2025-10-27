@@ -18,6 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -257,9 +259,19 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     crossSectionalRanking: "true",
     trainingDays: "252",
     testingDays: "252",
-    alpha: "0.01",
-    l1Ratio: "0.5",
+    alpha: "0.01", // can also be "custom"
+    l1Ratio: "0.5", // kept as string for legacy payload, slider will keep it in sync
   });
+
+  // Alpha "custom" value state
+  const [alphaCustom, setAlphaCustom] = useState<string>("0.10");
+
+  // L1 slider numeric mirror (authoritative for sending)
+  const [l1Slider, setL1Slider] = useState<number>(parseFloat(modelConfig.l1Ratio) || 0.5);
+
+  const alphaIsCustom = modelConfig.alpha === "custom";
+  const alphaParsed = alphaIsCustom ? Number(alphaCustom) : Number(modelConfig.alpha);
+  const alphaValid = !alphaIsCustom || (Number.isFinite(alphaParsed) && alphaParsed >= 0 && alphaParsed <= 1);
 
   const [clientStatus, setClientStatus] = useState<ClientStatus | null>(null);
   const [error, setError] = useState<string>("");
@@ -374,7 +386,17 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   const runModel = async () => {
     setError("");
 
+    // Validate alpha if custom
+    if (!alphaValid) {
+      setError("Please enter a custom alpha between 0 and 1 (inclusive).");
+      return;
+    }
+
     const horizons = selectedHorizons.length ? selectedHorizons : [10];
+
+    // Compute alpha and l1 to send
+    const alphaToSend = alphaIsCustom ? Number(alphaCustom) : Number(modelConfig.alpha);
+    const l1ToSend = Number.isFinite(l1Slider) ? l1Slider : 0.5;
 
     // Prefer a chosen uploaded Excel file if present
     const chosenId = activeFileId ?? null;
@@ -393,8 +415,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
           training_days: parseInt(modelConfig.trainingDays),
           testing_days: parseInt(modelConfig.testingDays),
-          alpha: parseFloat(modelConfig.alpha),
-          l1_ratio: parseFloat(modelConfig.l1Ratio),
+          alpha: alphaToSend,
+          l1_ratio: l1ToSend,
         };
 
         const { data } = await api.post(`/csv-uploads/${chosenId}/analyze/`, payload);
@@ -435,11 +457,12 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
         lookback_period: parseInt(modelConfig.lookbackPeriod),
         volatility_adjustment: modelConfig.volatilityAdjustment === "true",
         cross_sectional_ranking: modelConfig.crossSectionalRanking === "true",
-        // Advanced model parameters
+
+        // Advanced model parameters (updated)
         training_days: parseInt(modelConfig.trainingDays),
         testing_days: parseInt(modelConfig.testingDays),
-        alpha: parseFloat(modelConfig.alpha),
-        l1_ratio: parseFloat(modelConfig.l1Ratio),
+        alpha: alphaToSend,
+        l1_ratio: l1ToSend,
       };
 
       const response = await api.post(endpoint, payload);
@@ -513,6 +536,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       setPreUploadedFileInfo(null);
       setActiveFileId(null);
       setSelectedHorizons([10]);
+      setAlphaCustom("0.10");
+      setL1Slider(0.5);
       if (statusInterval) {
         clearInterval(statusInterval);
         setStatusInterval(null);
@@ -1050,6 +1075,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                   </p>
                 </div>
 
+                {/* Alpha: presets + custom */}
                 <div>
                   <Label htmlFor="alpha">Regularization Strength (Alpha)</Label>
                   <Select
@@ -1067,29 +1093,62 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                       <SelectItem value="0.1">0.1 (Moderate)</SelectItem>
                       <SelectItem value="0.5">0.5 (Strong)</SelectItem>
                       <SelectItem value="1.0">1.0 (Very strong)</SelectItem>
+                      <SelectItem value="custom">Custom…</SelectItem>
                     </SelectContent>
                   </Select>
+
+                  {alphaIsCustom && (
+                    <div className="mt-2">
+                      <Label htmlFor="alphaCustom" className="text-xs">
+                        Enter alpha (0–1)
+                      </Label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Input
+                          id="alphaCustom"
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          max={1}
+                          step={0.001}
+                          value={alphaCustom}
+                          onChange={(e) => setAlphaCustom(e.target.value)}
+                          className="w-40"
+                        />
+                        <span className="text-xs text-gray-500">inclusive</span>
+                      </div>
+                      {!alphaValid && (
+                        <p className="mt-1 text-xs text-red-600">
+                          Value must be between 0 and 1.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <Label htmlFor="l1Ratio">L1 Ratio (ElasticNet Mix)</Label>
-                  <Select
-                    value={modelConfig.l1Ratio}
-                    onValueChange={(value) =>
-                      setModelConfig((prev) => ({ ...prev, l1Ratio: value }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select L1 ratio" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0.0">0.0 (Ridge - L2 only)</SelectItem>
-                      <SelectItem value="0.25">0.25 (Mostly Ridge)</SelectItem>
-                      <SelectItem value="0.5">0.5 (Balanced ElasticNet)</SelectItem>
-                      <SelectItem value="0.75">0.75 (Mostly Lasso)</SelectItem>
-                      <SelectItem value="1.0">1.0 (Lasso - L1 only)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                {/* L1 ratio: slider 0..1 */}
+                <div className="md:col-span-2">
+                  <Label htmlFor="l1Ratio">L1 Ratio (ElasticNet mix)</Label>
+                  <div className="mt-2">
+                    <Slider
+                      value={[l1Slider]}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      onValueChange={(vals) => {
+                        const v = Array.isArray(vals) ? vals[0] ?? 0 : 0;
+                        setL1Slider(v);
+                        setModelConfig((prev) => ({ ...prev, l1Ratio: v.toString() }));
+                      }}
+                      aria-label="L1 ratio"
+                    />
+                    <div className="mt-1 flex items-center justify-between text-xs text-gray-600">
+                      <span>0 (Ridge / L2)</span>
+                      <span className="font-medium">
+                        Current: {l1Slider.toFixed(2)}
+                      </span>
+                      <span>1 (Lasso / L1)</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Multi-horizon status (derived) */}
@@ -1107,7 +1166,11 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
 
             <Button
               onClick={runModel}
-              disabled={uploadState !== "uploaded" || selectedHorizons.length === 0}
+              disabled={
+                uploadState !== "uploaded" ||
+                selectedHorizons.length === 0 ||
+                !alphaValid
+              }
               className="w-full"
             >
               {uploadState === "processing" ? (
