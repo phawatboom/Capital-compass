@@ -174,6 +174,44 @@ const fmtWeight = (v: number) => (Math.abs(v) < EPS ? "N/A" : v.toFixed(4));
 const isNonZero = (v: unknown) =>
   Number.isFinite(Number(v)) && Math.abs(Number(v as number)) > EPS;
 
+
+// Show all features in a fixed order
+const FEATURE_ORDER = [
+  "ret_1d","ret_5d","ret_20d",
+  "train_b","lag_train_b",
+  "ar1_corr_10d","ar1_corr_20d","ar1_corr_60d",
+  "sign_persist_20d","sign_persist_60d",
+  "vol_63d","vol_126d","vol_252d","vol_756d",
+  "Z_ma_20d",
+  "xsec_disp_1d","xsec_disp_30d",
+  "cs_rank_ret_1d","cs_rank_ret_5d","cs_rank_ret_20d",
+  "cs_rank_vol_63d","cs_rank_vol_126d","cs_rank_vol_252d","cs_rank_vol_756d",
+  "cs_rank_z_ma_20d",
+];
+
+// Build equation using all features, defaulting missing coefs to 0.000000
+function buildEquationFromShared(shared: SharedStats) {
+  const intercept = Number(shared.y_intercept ?? 0);
+  const pieces: string[] = [];
+
+  for (const f of FEATURE_ORDER) {
+    const key = `coef_${f}` as const;
+    const raw = shared[key];
+    const val = Number(raw ?? 0);
+
+    // skip zeros / near-zeros
+    if (!Number.isFinite(val) || Math.abs(val) < EPS) continue;
+
+    const sign = val >= 0 ? "+" : "-";
+    pieces.push(` ${sign}${Math.abs(val).toFixed(6)}·${f}`);
+  }
+
+  // If everything was zero, just show intercept
+  if (pieces.length === 0) return `y = ${intercept.toFixed(6)}`;
+
+  return `y = ${intercept.toFixed(6)}${pieces.join("")}`;
+}
+
 /** Type guard to narrow unknown → number */
 // const isFiniteNumber = (v: unknown): v is number =>
 //   typeof v === "number" && Number.isFinite(v);
@@ -543,32 +581,24 @@ export function BetaDashboard() {
         </CardHeader>
         <CardContent>
           {(() => {
-            const raw = String(sharedStats?.model_equation ?? "");
-            // remove terms like "+ 0·feature" or "- 0.000000·feature"
-            const cleaned =
-              raw
-                .replace(/([+\-]\s*)0+(?:\.0+)?·[^+\-]+/g, "") // drop zero-coefficient terms
-                .replace(/\s{2,}/g, " ")                       // tidy spaces
-                .replace(/\+\s-\s/g, "- ")                     // "+ -" → "-"
-                .trim() || "y = 0";
-
+            const eq = sharedStats ? buildEquationFromShared(sharedStats) : "N/A";
             return (
               <>
                 <div
                   className="font-mono text-sm whitespace-pre-wrap break-words max-h-40 overflow-auto rounded border p-2"
-                  title={cleaned}
+                  title={eq}
                 >
-                  {cleaned}
+                  {eq}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   ElasticNet regression form used for current run
                 </p>
-                {raw && (
+                {eq !== "N/A" && (
                   <Button
                     variant="outline"
                     size="sm"
                     className="mt-2"
-                    onClick={() => navigator.clipboard.writeText(cleaned)}
+                    onClick={() => navigator.clipboard.writeText(eq)}
                   >
                     Copy equation
                   </Button>
