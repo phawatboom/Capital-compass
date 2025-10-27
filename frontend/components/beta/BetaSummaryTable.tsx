@@ -71,6 +71,12 @@ export interface BetaSummaryRow {
   latest_beta_true?: number | null;
 
   r2_oos?: number | null;
+  mae_oos?: number | null;
+  rmse_oos?: number | null;
+  diracc_oos?: number | null;
+  predstd_oos?: number | null;
+  n_oos?: number | null;
+  
 }
 
 export interface BetaSummaryTableProps {
