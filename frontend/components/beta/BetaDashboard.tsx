@@ -143,6 +143,9 @@ const prettyKey = (k: string) =>
     .replace(/^coef_/, "Coefficient ")
     .replace(/_/g, " ");
 
+const EPS = 1e-12;
+const isNonZero = (v: unknown) =>
+  Number.isFinite(Number(v)) && Math.abs(Number(v as number)) > EPS;
 
 /** Type guard to narrow unknown → number */
 // const isFiniteNumber = (v: unknown): v is number =>
@@ -400,8 +403,9 @@ export function BetaDashboard() {
           {(() => {
             // find top positive / negative coefficient keys to exclude
             const coefPairs = Object.entries(sharedStats).filter(
-              ([k, v]) => k.startsWith("coef_") && Number.isFinite(Number(v))
+              ([k, v]) => k.startsWith("coef_") && isNonZero(v)
             ) as [string, number][];
+          
 
             const topPos = coefPairs.length
               ? [...coefPairs].sort((a, b) => b[1] - a[1])[0][0] // key only
@@ -422,7 +426,7 @@ export function BetaDashboard() {
             // collect the rest: all avg_* and coef_* remaining
             const rest = Object.entries(sharedStats)
               .filter(([k, v]) => (k.startsWith("avg_") || k.startsWith("coef_")) && !exclude.has(k))
-              .filter(([, v]) => Number.isFinite(Number(v)))
+                .filter(([, v]) => isNonZero(v))   // hide zeros
               .sort(([a], [b]) => a.localeCompare(b)); // simple stable order
 
             return rest.map(([k, v]) => (
