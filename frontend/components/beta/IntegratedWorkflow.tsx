@@ -227,7 +227,18 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   >("idle");
   const [clientId, setClientId] = useState<string>("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [horizonDays, setHorizonDays] = useState<string>("10");
+
+  // —— Multi-horizon support: only 1, 5, 10, 20 ——
+  const DEFAULT_HORIZON_OPTIONS = [1, 5, 10, 20] as const;
+  const [selectedHorizons, setSelectedHorizons] = useState<number[]>([10]);
+
+  const toggleHorizon = (h: number) => {
+    setSelectedHorizons((prev) => {
+      const next = prev.includes(h) ? prev.filter((x) => x !== h) : [...prev, h];
+      return [...new Set(next)].sort((a, b) => a - b);
+    });
+  };
+
   const [preUploadedFileInfo, setPreUploadedFileInfo] = useState<any>(null);
 
   // Which uploaded file is currently selected for analysis (from prop or picker)
@@ -236,7 +247,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   // Modal open/close
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Enhanced model configuration
+  // Enhanced model configuration (no explicit multiPeriod flag; derived from selection size)
   const [modelConfig, setModelConfig] = useState({
     riskTolerance: "medium",
     sectorFilter: "all",
@@ -248,7 +259,6 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
     testingDays: "252",
     alpha: "0.01",
     l1Ratio: "0.5",
-    multiPeriod: "false",
   });
 
   const [clientStatus, setClientStatus] = useState<ClientStatus | null>(null);
@@ -315,8 +325,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
     },
     multiple: false,
-    noClick: true,      // we’ll drive clicks explicitly via open()
-    noKeyboard: true,   // and keyboard, to keep behavior consistent
+    noClick: true, // we’ll drive clicks explicitly via open()
+    noKeyboard: true, // and keyboard, to keep behavior consistent
   });
 
   const uploadFile = async () => {
@@ -364,6 +374,8 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
   const runModel = async () => {
     setError("");
 
+    const horizons = selectedHorizons.length ? selectedHorizons : [10];
+
     // Prefer a chosen uploaded Excel file if present
     const chosenId = activeFileId ?? null;
 
@@ -372,12 +384,17 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       try {
         setUploadState("processing");
         const payload = {
-          horizon_days: parseInt(horizonDays),
+          // Multi-horizon input (strictly from {1,5,10,20})
+          horizons,
+          // Backward-compatibility for older backends expecting single integer
+          horizon_days: horizons.length === 1 ? horizons[0] : undefined,
+          // Legacy multi-period toggle derived from selection size
+          multi_period: horizons.length > 1,
+
           training_days: parseInt(modelConfig.trainingDays),
           testing_days: parseInt(modelConfig.testingDays),
           alpha: parseFloat(modelConfig.alpha),
           l1_ratio: parseFloat(modelConfig.l1Ratio),
-          multi_period: modelConfig.multiPeriod === "true",
         };
 
         const { data } = await api.post(`/csv-uploads/${chosenId}/analyze/`, payload);
@@ -405,7 +422,12 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       const endpoint = "/integrated/run-model/";
       const payload: any = {
         client_id: clientId,
-        horizon_days: parseInt(horizonDays),
+
+        // Multi-horizon input (strictly from {1,5,10,20})
+        horizons,
+        horizon_days: horizons.length === 1 ? horizons[0] : undefined,
+        multi_period: horizons.length > 1,
+
         // Enhanced model configuration
         risk_tolerance: modelConfig.riskTolerance,
         sector_filter: modelConfig.sectorFilter,
@@ -418,7 +440,6 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
         testing_days: parseInt(modelConfig.testingDays),
         alpha: parseFloat(modelConfig.alpha),
         l1_ratio: parseFloat(modelConfig.l1Ratio),
-        multi_period: modelConfig.multiPeriod === "true",
       };
 
       const response = await api.post(endpoint, payload);
@@ -491,6 +512,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
       setUploadProgress(0);
       setPreUploadedFileInfo(null);
       setActiveFileId(null);
+      setSelectedHorizons([10]);
       if (statusInterval) {
         clearInterval(statusInterval);
         setStatusInterval(null);
@@ -900,7 +922,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
             Configure Model
           </CardTitle>
           <CardDescription>
-            Select prediction horizon for your beta forecasting model
+            Select one or more prediction horizons for your beta forecasting model
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -908,20 +930,50 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
             {/* Primary Configuration */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="horizon">Prediction Horizon</Label>
-                <Select value={horizonDays} onValueChange={setHorizonDays}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select horizon" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1 Day (Daily)</SelectItem>
-                    <SelectItem value="5">5 Days (Weekly)</SelectItem>
-                    <SelectItem value="10">10 Days (Fortnightly)</SelectItem>
-                    <SelectItem value="20">20 Days (Monthly)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="horizons">Prediction Horizons</Label>
+
+                {/* Toggle chips for allowed horizons: 1, 5, 10, 20 */}
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2" id="horizons">
+                  {DEFAULT_HORIZON_OPTIONS.map((h) => {
+                    const active = selectedHorizons.includes(h);
+                    return (
+                      <button
+                        type="button"
+                        key={h}
+                        onClick={() => toggleHorizon(h)}
+                        className={`rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          active
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-gray-900 hover:bg-gray-50"
+                        }`}
+                        aria-pressed={active}
+                      >
+                        {h}d
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Selected summary and clear */}
+                <div className="mt-3 flex items-center gap-2">
+                  <p className="text-xs text-gray-600">
+                    Selected: {selectedHorizons.length
+                      ? selectedHorizons.map((h) => `${h}d`).join(", ")
+                      : "none"}
+                  </p>
+                  {!!selectedHorizons.length && (
+                    <Button
+                      variant="ghost"
+                      className="text-gray-600"
+                      onClick={() => setSelectedHorizons([])}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+
                 <p className="text-xs text-gray-500 mt-1">
-                  Note: server-side sector filtering is only applied if the uploaded dataset
+                  Server-side sector filtering is only applied if the uploaded dataset
                   includes a <code>sector</code> column and the backend is configured to use it.
                 </p>
               </div>
@@ -1040,32 +1092,24 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                   </Select>
                 </div>
 
+                {/* Multi-horizon status (derived) */}
                 <div className="md:col-span-2 lg:col-span-1">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="multiPeriod"
-                      checked={modelConfig.multiPeriod === "true"}
-                      onChange={(e) =>
-                        setModelConfig((prev) => ({
-                          ...prev,
-                          multiPeriod: e.target.checked ? "true" : "false",
-                        }))
-                      }
-                      className="rounded border-gray-300"
-                    />
-                    <Label htmlFor="multiPeriod" className="text-sm">
-                      Multi-Period Analysis (1d, 5d, 10d, 20d)
-                    </Label>
+                  <div className="text-sm">
+                    <span className="font-medium">Multi-horizon mode:</span>{" "}
+                    {selectedHorizons.length > 1 ? "Enabled" : "Single horizon"}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    Run predictions for all time horizons
+                    Enabled automatically when you choose more than one horizon.
                   </p>
                 </div>
               </div>
             </div>
 
-            <Button onClick={runModel} disabled={uploadState !== "uploaded"} className="w-full">
+            <Button
+              onClick={runModel}
+              disabled={uploadState !== "uploaded" || selectedHorizons.length === 0}
+              className="w-full"
+            >
               {uploadState === "processing" ? (
                 <>
                   <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Processing Model...
@@ -1122,9 +1166,11 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                       </div>
                       <div className="text-center p-3 bg-green-50 rounded-lg">
                         <p className="text-2xl font-bold text-green-600">
-                          {horizonDays}d
+                          {selectedHorizons.map((h) => `${h}d`).join(", ")}
                         </p>
-                        <p className="text-sm text-gray-600">Horizon</p>
+                        <p className="text-sm text-gray-600">
+                          {selectedHorizons.length > 1 ? "Horizons" : "Horizon"}
+                        </p>
                       </div>
                       <div className="text-center p-3 bg-purple-50 rounded-lg">
                         <p className="text-2xl font-bold text-purple-600">
@@ -1159,9 +1205,9 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
             <CardTitle className="flex items-center gap-2">
               <CheckCircle className="h-6 w-6 text-green-600" /> Results Ready
             </CardTitle>
-          <CardDescription>
-            Your custom beta analysis is complete and ready to view
-          </CardDescription>
+            <CardDescription>
+              Your custom beta analysis is complete and ready to view
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
