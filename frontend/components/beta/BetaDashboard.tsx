@@ -45,6 +45,12 @@ interface BetaSummary {
   confidence_level: string;
 
   r2_oos?: number | null; 
+  mae_oos?: number | null;
+  rmse_oos?: number | null;
+  diracc_oos?: number | null;
+  predstd_oos?: number | null;
+  n_oos?: number | null;
+  horizon_days?: number | null;
 }
 
 interface BetaTimeSeriesData {
@@ -191,12 +197,20 @@ export function BetaDashboard() {
   // Modal state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
+  // useEffect(() => {
+  // fetch(api("/api/factors/shared/"))
+  //   .then(res => res.json())
+  //   .then(setSharedStats)
+  //   .catch(() => {});
+  // }, []);
+
   useEffect(() => {
   fetch(api("/api/factors/shared/"))
     .then(res => res.json())
-    .then(setSharedStats)
+    .then(payload => setSharedStats(Array.isArray(payload) ? payload[0] : payload))
     .catch(() => {});
   }, []);
+
 
   // Load available analysis runs once
     useEffect(() => {
@@ -215,15 +229,13 @@ export function BetaDashboard() {
     if (!sharedId || summaryData.length === 0) return;
 
     (async () => {
-      const oos = await fetchOOS(sharedId);
-      const byTicker = new Map(oos.map(r => [r.ticker, r.r2_oos]));
-      setSummaryData(prev =>
-        prev.map(row => ({
-          ...row,
-          r2_oos: byTicker.get(row.ticker) ?? null,
-        })),
-      );
+    const oos = await fetchOOS(sharedId);
+    const byTicker = new Map(oos.map(r => [r.ticker, r.r2_oos]));
+    setSummaryData(prev =>
+      prev.map(row => ({ ...row, r2_oos: byTicker.get(row.ticker) ?? row?.r2_oos ?? null }))
+    );
     })();
+
     // depend on length to avoid loops when only values change
   }, [sharedStats, summaryData.length]);
 
@@ -234,24 +246,24 @@ export function BetaDashboard() {
   }
 
 
-  useEffect(() => {
-    if (!selectedRunId || !summaryData?.length) return;
+  // useEffect(() => {
+  //   if (!selectedRunId || !summaryData?.length) return;
 
-    (async () => {
-      try {
-        const res = await fetch(api(`/api/analysis-runs/${selectedRunId}/performance/`), { credentials: "include" });
-        if (!res.ok) return;
-        const payload = await res.json();
-        const rows = Array.isArray(payload?.results) ? payload.results : [];
-        const r2ByTicker = new Map(rows.map((r: any) => [r.ticker, r.r2_oos]));
-        setSummaryData(prev =>
-          Array.isArray(prev)
-            ? prev.map(row => ({ ...row, r2_oos: r2ByTicker.get(row.ticker) ?? row.r2_oos ?? null }))
-            : prev
-        );
-      } catch {}
-    })();
-  }, [selectedRunId, summaryData?.length]);
+  //   (async () => {
+  //     try {
+  //       const res = await fetch(api(`/api/analysis-runs/${selectedRunId}/performance/`), { credentials: "include" });
+  //       if (!res.ok) return;
+  //       const payload = await res.json();
+  //       const rows = Array.isArray(payload?.results) ? payload.results : [];
+  //       const r2ByTicker = new Map(rows.map((r: any) => [r.ticker, r.r2_oos]));
+  //       setSummaryData(prev =>
+  //         Array.isArray(prev)
+  //           ? prev.map(row => ({ ...row, r2_oos: r2ByTicker.get(row.ticker) ?? row.r2_oos ?? null }))
+  //           : prev
+  //       );
+  //     } catch {}
+  //   })();
+  // }, [selectedRunId, summaryData?.length]);
 
 
   // useEffect(() => {
@@ -434,16 +446,16 @@ export function BetaDashboard() {
             </CardContent>
           </Card>
 
-          {/* Volatility Coefficient */}
+          {/* Y-Intercept */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Volatility Coefficient</CardTitle>
+              <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {sharedStats.volatility_coeff?.toFixed(4) ?? "N/A"}
-              </div>
-              <p className="text-xs text-muted-foreground">ElasticNet intercept term for volatility</p>
+              <div className="text-2xl font-bold">{sharedStats.y_intercept?.toFixed(3) ?? "N/A"}</div>
+              <p className="text-xs text-muted-foreground">
+                Model baseline term (average intercept across all tickers)
+              </p>
             </CardContent>
           </Card>
 
