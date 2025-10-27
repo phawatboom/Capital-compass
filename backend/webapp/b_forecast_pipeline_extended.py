@@ -1425,7 +1425,7 @@ if __name__ == "__main__":
 
     # --- 4. Define Parallelism Settings ---
     total_cpus = os.cpu_count()
-    cores_to_use = max(1, total_cpus - 2)  # Leave 2 cores free
+    cores_to_use = max(1, total_cpus - 1)  # Leave 1 core free
     n_horizons = len(HORIZONS_IN_DAYS)
 
     # Cap main pool at number of horizons.

@@ -89,7 +89,7 @@ else:
 
 if DEBUG:
     # Dev: running over HTTP from localhost
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "54.206.19.192"]
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]", "3.104.120.14"]
 
     SESSION_COOKIE_SECURE = False     # ok in dev (HTTP)
     CSRF_COOKIE_SECURE = False
@@ -100,12 +100,12 @@ if DEBUG:
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://54.206.19.192:3000",
+        "http://3.104.120.14:3000",
     ]
     CSRF_TRUSTED_ORIGINS = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://54.206.19.192:3000",
+        "http://3.104.120.14:3000",
     ]
 
     # Optional last-resort during early bring-up (remove once things work):
