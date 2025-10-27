@@ -324,6 +324,24 @@ class FactorSharedStats(models.Model):
     """Stores the pooled ElasticNet model's shared/global coefficients and factor averages."""
     created_at = models.DateTimeField(default=timezone.now)
     model_used = models.CharField(max_length=50, default="enet")
+    intercept_raw = models.FloatField(null=True)
+
+    # models.py
+    volatility_coeff = models.FloatField(null=True)   # standardized intercept (already present)
+    coef_std = models.JSONField(default=dict)         # NEW: standardized coef by feature
+    intercept_raw = models.FloatField(null=True)      # NEW: raw intercept
+    coef_raw = models.JSONField(default=dict)         # NEW: raw coef by feature
+    feature_means = models.JSONField(default=dict)    # optional
+    feature_scales = models.JSONField(default=dict)   # optional
+    model_equation = models.TextField(blank=True, default="")  # optional pretty string
+
+    # FactorSharedStats
+    training_days     = models.IntegerField(null=True)   # base_train_len_days
+    testing_days      = models.IntegerField(null=True)   # base_test_len_days
+    enet_alpha        = models.FloatField(null=True)
+    enet_l1_ratio     = models.FloatField(null=True)
+    oos_min_train_rows= models.IntegerField(null=True)
+    run_params        = models.JSONField(default=dict)   # future-proof catch-all
 
     # --- Coefficients (ElasticNet learned weights for each factor) ---
     coef_train_b = models.FloatField(null=True, blank=True)
@@ -426,9 +444,33 @@ class StockFactorResult(models.Model):
     xsec_disp_30d = models.FloatField(null=True, blank=True)
 
     horizon_days = models.IntegerField(default=5)
+    intercept_raw = models.FloatField(null=True)
+    coef_raw = models.JSONField(default=dict)        # {"feature": coef_raw}
+    feature_means = models.JSONField(default=dict)   # {"feature": mean}
+    feature_scales = models.JSONField(default=dict)  # {"feature": scale}
 
     def __str__(self):
         return f"{self.ticker} ({self.horizon_days}d) @ {self.created_at:%Y-%m-%d}"
+
+class StockOOSMetric(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    shared_stats = models.ForeignKey(
+        FactorSharedStats, on_delete=models.CASCADE, related_name="oos_metrics"
+    )
+    ticker = models.CharField(max_length=16, db_index=True)
+    horizon_days = models.IntegerField(db_index=True)
+    r2_oos = models.FloatField(null=True)
+    rmse_oos = models.FloatField(null=True)
+    mae_oos = models.FloatField(null=True)
+    mase_oos = models.FloatField(null=True)
+    diracc_oos = models.FloatField(null=True)
+    predstd_oos = models.FloatField(null=True)
+    n_oos = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ("shared_stats", "ticker", "horizon_days")
+        indexes = [models.Index(fields=["ticker", "horizon_days"])]
+
 
 # New Models for Pooled Model Outputs
 class AnalysisRun(models.Model):

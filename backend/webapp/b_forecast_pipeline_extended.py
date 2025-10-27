@@ -1090,6 +1090,38 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
     coeffs = dict(zip(enet_bundle['train_cols'], model.coef_))
     intercept = model.intercept_
 
+    # add this:
+    scaler = pipeline.named_steps.get('scaler', None)
+    cols = enet_bundle['train_cols']
+
+    import numpy as np
+    import pandas as pd
+
+    coef_std = pd.Series(model.coef_, index=cols, dtype=float)
+    b0_std = float(model.intercept_)
+
+    # pull scaler stats safely
+    if scaler is not None and hasattr(scaler, "mean_") and hasattr(scaler, "scale_"):
+        mu = scaler.mean_
+        sigma = scaler.scale_
+    else:
+        # fallback if no scaler present
+        mu = np.zeros(len(cols))
+        sigma = np.ones(len(cols))
+
+    # convert to original feature scale
+    coef_raw_vals = (coef_std.values / sigma).astype(float)
+    b0_raw = float(b0_std - np.sum(coef_std.values * mu / sigma))
+
+    coef_std_dict = {c: float(v) for c, v in zip(cols, coef_std.values)}
+    coef_raw_dict = {c: float(v) for c, v in zip(cols, coef_raw_vals)}
+    feature_means_dict = {c: float(m) for c, m in zip(cols, mu)}
+    feature_scales_dict = {c: float(s) for c, s in zip(cols, sigma)}
+
+    # human readable equation string (raw space, top 8 by |coef|)
+    top_terms = sorted(coef_raw_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:8]
+    model_equation = "y = " + f"{b0_raw:+.6f} " + " ".join([f"{v:+.6f}·{k}" for k, v in top_terms])
+
     # --- Global R² ---
     oos_preds, metrics, _ = walk_forward_oos_eval(
         pooled_df,
@@ -1111,6 +1143,29 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
         r2_global=metrics.get("R2_global"),
         volatility_coeff=intercept,
         horizon_days=horizon,
+
+        # new fields
+        coef_std=coef_std_dict,         # keep standardized coefs for audit
+        intercept_raw=b0_raw,           # raw intercept for human equation
+        coef_raw=coef_raw_dict,         # raw coefs for UI
+        feature_means=feature_means_dict,
+        feature_scales=feature_scales_dict,
+        model_equation=model_equation,
+
+        # new config fields
+        training_days=int(best_params.get("base_train_len_days", None)),
+        testing_days=int(best_params.get("base_test_len_days", None)),
+        enet_alpha=float(best_params.get("enet_alpha", None)),
+        enet_l1_ratio=float(best_params.get("enet_l1_ratio", None)),
+        oos_min_train_rows=int(best_params.get("oos_min_train_rows_fixed", None)),
+        run_params={
+            "base_train_len_days": int(best_params.get("base_train_len_days", 0)),
+            "base_test_len_days":  int(best_params.get("base_test_len_days", 0)),
+            "enet_alpha":          float(best_params.get("enet_alpha", 0.0)),
+            "enet_l1_ratio":       float(best_params.get("enet_l1_ratio", 0.0)),
+            "dropna_rows":         False,  # since you pass dropna_rows=False
+        },
+
         **{f"coef_{k}": v for k, v in coeffs.items() if hasattr(FactorSharedStats, f"coef_{k}")},
         **{f"avg_{k}": pooled_df[k].mean() if k in pooled_df.columns else None
            for k in [c for c in enet_bundle['train_cols'] if hasattr(FactorSharedStats, f"avg_{c}")]},

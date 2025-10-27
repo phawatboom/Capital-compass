@@ -112,4 +112,6 @@ urlpatterns = [
     path('time-series/<int:run_id>/<str:ticker>/', time_series_analysis, name='time-series-analysis'),
     path('prediction-distribution/<int:run_id>/', prediction_distribution, name='prediction-distribution'),
     path('save-analysis/', save_analysis_results, name='save-analysis-results'),
+    path("api/factor-stats/<int:pk>/summary/", factor_stats_summary, name="factor-stats-summary"),
+    path("api/factor-stats/<int:pk>/oos/", factor_stats_oos_table, name="factor-stats-oos"),
 ]
