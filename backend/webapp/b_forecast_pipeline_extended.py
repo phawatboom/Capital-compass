@@ -1171,6 +1171,87 @@ def train_final_model_and_save(pooled_df: pd.DataFrame, best_params: pd.Series, 
            for k in [c for c in enet_bundle['train_cols'] if hasattr(FactorSharedStats, f"avg_{c}")]},
     )
 
+    # --- Save per-ticker OUT-OF-SAMPLE metrics for the frontend table ---
+    from .models import StockOOSMetric
+
+    # Defensive: skip if no OOS preds
+    if oos_preds is not None and not oos_preds.empty:
+        # Clean and aggregate per ticker
+        oos_clean = oos_preds[['Ticker', 'actual_b', 'pred_b']].copy()
+        oos_clean['actual_b'] = pd.to_numeric(oos_clean['actual_b'], errors='coerce')
+        oos_clean['pred_b'] = pd.to_numeric(oos_clean['pred_b'], errors='coerce')
+        oos_clean = oos_clean.replace([np.inf, -np.inf], np.nan).dropna()
+
+        def safe_r2(g):
+            if len(g) < 2 or np.std(g['actual_b']) < 1e-9:
+                return np.nan
+            try:
+                return r2_score(g['actual_b'], g['pred_b'])
+            except ValueError:
+                return np.nan
+
+        def rmse(g):
+            if len(g) < 1:
+                return np.nan
+            return np.sqrt(mean_squared_error(g['actual_b'], g['pred_b']))
+
+        def mae(g):
+            if len(g) < 1:
+                return np.nan
+            return mean_absolute_error(g['actual_b'], g['pred_b'])
+
+        def dir_acc(g):
+            if len(g) < 1:
+                return np.nan
+            return float(np.mean(np.sign(g['actual_b']) == np.sign(g['pred_b'])))
+
+        def pred_std(g):
+            if len(g) < 1:
+                return np.nan
+            return float(np.std(g['pred_b']))
+
+        agg = (
+            oos_clean.groupby('Ticker')
+            .apply(lambda g: pd.Series({
+                'r2_oos': safe_r2(g),
+                'rmse_oos': rmse(g),
+                'mae_oos': mae(g),
+                # simple MASE proxy: MAE divided by in-sample MAE baseline is not available here,
+                # so keep NaN or compute a simple scale by MAE of a naive model if you have it.
+                'mase_oos': np.nan,
+                'diracc_oos': dir_acc(g),
+                'predstd_oos': pred_std(g),
+                'n_oos': int(len(g)),
+            }))
+            .reset_index()
+            .rename(columns={'Ticker': 'ticker'})
+        )
+
+        # Optional: drop very small n
+        # agg = agg[agg['n_oos'] >= 10]
+
+        # Replace existing rows for this shared run to avoid duplicates on rerun
+        StockOOSMetric.objects.filter(shared_stats=shared).delete()
+
+        # Bulk insert into the table the frontend endpoint reads
+        rows = [
+            StockOOSMetric(
+                shared_stats=shared,
+                ticker=row['ticker'],
+                horizon_days=horizon,
+                r2_oos=None if pd.isna(row['r2_oos']) else float(row['r2_oos']),
+                rmse_oos=None if pd.isna(row['rmse_oos']) else float(row['rmse_oos']),
+                mae_oos=None if pd.isna(row['mae_oos']) else float(row['mae_oos']),
+                mase_oos=None if pd.isna(row['mase_oos']) else float(row['mase_oos']),
+                diracc_oos=None if pd.isna(row['diracc_oos']) else float(row['diracc_oos']),
+                predstd_oos=None if pd.isna(row['predstd_oos']) else float(row['predstd_oos']),
+                n_oos=int(row['n_oos']),
+            )
+            for _, row in agg.iterrows()
+        ]
+        if rows:
+            StockOOSMetric.objects.bulk_create(rows, batch_size=1000)
+
     # --- ✅ NEW: Generate rolling time series predictions ---
     print("📈 Generating rolling stock time series for visualization...")
 

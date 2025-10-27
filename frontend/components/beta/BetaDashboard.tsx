@@ -23,6 +23,10 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
+// ADD: just below other ui imports
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 /** API base URL - adjust based on your backend configuration */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -39,6 +43,8 @@ interface BetaSummary {
   prediction_accuracy: number | null;
   forecast_count: number;
   confidence_level: string;
+
+  r2_oos?: number | null; 
 }
 
 interface BetaTimeSeriesData {
@@ -52,6 +58,13 @@ interface BetaTimeSeriesData {
   }>;
 }
 
+type RunSummary = {
+  id: number;
+  run_name?: string;
+  horizon_days?: number;
+  created_at?: string;
+};
+
 /** Accept numbers or numeric-looking strings from the API */
 type NumericLike = number | `${number}`;
 
@@ -60,6 +73,13 @@ type SharedStats = {
   r2_global?: number;
   volatility_coeff?: number;
   y_intercept?: number;
+
+  // add these
+  model_equation?: string;
+  training_days?: number;
+  testing_days?: number;
+  enet_alpha?: number;
+  enet_l1_ratio?: number;
 
   
   // Coefficients (from your DB screenshots)
@@ -161,20 +181,95 @@ export function BetaDashboard() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [sharedStats, setSharedStats] = useState<SharedStats | null>(null);
   const [showMore, setShowMore] = useState(false);
+  const [horizon, setHorizon] = useState(5);
+
+  // Analysis run selection state
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
 
 
   // Modal state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  /** Load shared/global factor stats */
   useEffect(() => {
-    fetch(api("/api/factors/shared/"))
-      .then((res) => res.json())
-      .then(setSharedStats)
-      .catch(() => {
-        /* silently ignore */
-      });
+  fetch(api("/api/factors/shared/"))
+    .then(res => res.json())
+    .then(setSharedStats)
+    .catch(() => {});
   }, []);
+
+  // Load available analysis runs once
+    useEffect(() => {
+      (async () => {
+        try {
+          const data = await fetchRuns();
+          setRuns(data || []);
+          if (data?.length) setSelectedRunId(data[0].id);
+        } catch {}
+      })();
+    }, []);
+
+  useEffect(() => {
+    // need both: shared stats id and a non-empty summary table
+    const sharedId = (sharedStats as any)?.id as number | undefined;
+    if (!sharedId || summaryData.length === 0) return;
+
+    (async () => {
+      const oos = await fetchOOS(sharedId);
+      const byTicker = new Map(oos.map(r => [r.ticker, r.r2_oos]));
+      setSummaryData(prev =>
+        prev.map(row => ({
+          ...row,
+          r2_oos: byTicker.get(row.ticker) ?? null,
+        })),
+      );
+    })();
+    // depend on length to avoid loops when only values change
+  }, [sharedStats, summaryData.length]);
+
+  async function fetchRuns() {
+    const res = await fetch(api("/api/analysis-runs/"), { credentials: "include" });
+    if (!res.ok) return [];
+    return await res.json();
+  }
+
+
+  useEffect(() => {
+    if (!selectedRunId || !summaryData?.length) return;
+
+    (async () => {
+      try {
+        const res = await fetch(api(`/api/analysis-runs/${selectedRunId}/performance/`), { credentials: "include" });
+        if (!res.ok) return;
+        const payload = await res.json();
+        const rows = Array.isArray(payload?.results) ? payload.results : [];
+        const r2ByTicker = new Map(rows.map((r: any) => [r.ticker, r.r2_oos]));
+        setSummaryData(prev =>
+          Array.isArray(prev)
+            ? prev.map(row => ({ ...row, r2_oos: r2ByTicker.get(row.ticker) ?? row.r2_oos ?? null }))
+            : prev
+        );
+      } catch {}
+    })();
+  }, [selectedRunId, summaryData?.length]);
+
+
+  // useEffect(() => {
+  // fetch(api(`/api/factor-stats/latest/summary?horizon=${horizon}`))
+  //   .then((res) => res.json())
+  //   .then(setSharedStats)
+  //   .catch(() => {});
+  //   }, [horizon]);
+
+  // add this helper near other API helpers
+  async function fetchOOS(sharedId: number) {
+    const res = await fetch(api(`/api/factor-stats/${sharedId}/oos/?min_n=10&order=-r2_oos`), {
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) return [];
+    return (await res.json()) as Array<{ ticker: string; r2_oos: number | null }>;
+  }
 
   /** Summary fetch */
   const fetchSummaryData = async () => {
@@ -295,6 +390,28 @@ export function BetaDashboard() {
 )}
       </div>
 
+      {/* Analysis files / runs selector */}
+      {runs.length > 0 && (
+        <div className="w-full overflow-x-auto pb-2">
+          <div className="inline-flex gap-2">
+            {runs.map(run => (
+              <button
+                key={run.id}
+                onClick={() => setSelectedRunId(run.id)}
+                className={[
+                  "px-3 py-1 text-sm rounded-full border",
+                  selectedRunId === run.id ? "bg-primary text-primary-foreground" : "bg-background"
+                ].join(" ")}
+                title={`${run.run_name ?? "Run"} • ${run.horizon_days ?? "-"}d • ${run.created_at ? new Date(run.created_at).toLocaleString() : ""}`}
+              >
+                {run.run_name ?? `Run #${run.id}`}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+
       {/* Error Alert */}
       {error && (
         <Alert variant="destructive">
@@ -327,19 +444,6 @@ export function BetaDashboard() {
                 {sharedStats.volatility_coeff?.toFixed(4) ?? "N/A"}
               </div>
               <p className="text-xs text-muted-foreground">ElasticNet intercept term for volatility</p>
-            </CardContent>
-          </Card>
-
-          {/* Y-Intercept */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Y-Intercept</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{sharedStats.y_intercept?.toFixed(3) ?? "N/A"}</div>
-              <p className="text-xs text-muted-foreground">
-                Model baseline term (average intercept across all tickers)
-              </p>
             </CardContent>
           </Card>
 
@@ -395,6 +499,17 @@ export function BetaDashboard() {
 
         </div>
       )}
+
+      {/* Model Equation
+      <Card>
+        <CardHeader className="pb-1">
+          <CardTitle className="text-sm font-medium">Model Equation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-xl font-bold">{sharedStats.model_equation ?? "N/A"}</div>
+          <p className="text-xs text-muted-foreground">Model Equation</p>
+        </CardContent>
+      </Card> */}
 
       
       {/* Collapsible metrics */}
