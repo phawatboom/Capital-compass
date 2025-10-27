@@ -23,15 +23,22 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-// ADD: just below other ui imports
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+/** API base URL – use the same env var as the Uploads page.
+ * Example (frontend/.env):
+ *   NEXT_PUBLIC_API_BASE_URL=/api
+ */
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "/api";
 
-/** API base URL - adjust based on your backend configuration */
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+/** Join a base (absolute or relative) with a resource path safely. */
+const api = (path: string) => {
+  const base = (API_BASE || "").replace(/\/+$/, "");
+  const p = (path || "").replace(/^\/+/, "");
+  return `${base}/${p}`;
+};
 
-/** Build absolute URLs robustly and safely encode path segments */
-const api = (path: string) => new URL(path, API_BASE).toString();
+/** Safely encode path segments like tickers. */
 const seg = (s: string) => encodeURIComponent(String(s).trim());
 
 interface BetaSummary {
@@ -44,7 +51,7 @@ interface BetaSummary {
   forecast_count: number;
   confidence_level: string;
 
-  r2_oos?: number | null; 
+  r2_oos?: number | null;
   mae_oos?: number | null;
   rmse_oos?: number | null;
   diracc_oos?: number | null;
@@ -80,15 +87,14 @@ type SharedStats = {
   volatility_coeff?: number;
   y_intercept?: number;
 
-  // add these
+  // additional metadata if present
   model_equation?: string;
   training_days?: number;
   testing_days?: number;
   enet_alpha?: number;
   enet_l1_ratio?: number;
 
-  
-  // Coefficients (from your DB screenshots)
+  // Coefficients
   coef_train_b?: NumericLike | null;
   coef_lag_train_b?: NumericLike | null;
   coef_ar1_corr_10d?: NumericLike | null;
@@ -113,7 +119,7 @@ type SharedStats = {
   coef_cs_rank_vol_252d?: NumericLike | null;
   coef_cs_rank_vol_756d?: NumericLike | null;
 
-  // Averages (from your DB screenshots)
+  // Averages
   avg_train_b?: NumericLike | null;
   avg_lag_train_b?: NumericLike | null;
   avg_ar1_corr_10d?: NumericLike | null;
@@ -143,7 +149,6 @@ type SharedStats = {
   [key: `avg_${string}`]: NumericLike | null | undefined;
 };
 
-
 type Entry = [string, unknown];
 
 const isFiniteNumber = (v: unknown): v is number =>
@@ -154,7 +159,6 @@ function isCoefEntryNumber(e: Entry): e is [string, number] {
   return e[0].startsWith("coef_") && isFiniteNumber(e[1]);
 }
 
-// Optional: a safe formatter for tiny numbers
 function fmtNum(v: unknown) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "N/A";
@@ -162,7 +166,7 @@ function fmtNum(v: unknown) {
   if (a > 0 && a < 1e-4) return n.toExponential(2);
   return n.toFixed(4);
 }
-// Pretty-print keys like "avg_cs_rank_vol_126d" → "Average cs rank vol 126d"
+
 const prettyKey = (k: string) =>
   k
     .replace(/^avg_/, "Average ")
@@ -174,18 +178,17 @@ const fmtWeight = (v: number) => (Math.abs(v) < EPS ? "N/A" : v.toFixed(4));
 const isNonZero = (v: unknown) =>
   Number.isFinite(Number(v)) && Math.abs(Number(v as number)) > EPS;
 
-
 // Show all features in a fixed order
 const FEATURE_ORDER = [
-  "ret_1d","ret_5d","ret_20d",
-  "train_b","lag_train_b",
-  "ar1_corr_10d","ar1_corr_20d","ar1_corr_60d",
-  "sign_persist_20d","sign_persist_60d",
-  "vol_63d","vol_126d","vol_252d","vol_756d",
+  "ret_1d", "ret_5d", "ret_20d",
+  "train_b", "lag_train_b",
+  "ar1_corr_10d", "ar1_corr_20d", "ar1_corr_60d",
+  "sign_persist_20d", "sign_persist_60d",
+  "vol_63d", "vol_126d", "vol_252d", "vol_756d",
   "Z_ma_20d",
-  "xsec_disp_1d","xsec_disp_30d",
-  "cs_rank_ret_1d","cs_rank_ret_5d","cs_rank_ret_20d",
-  "cs_rank_vol_63d","cs_rank_vol_126d","cs_rank_vol_252d","cs_rank_vol_756d",
+  "xsec_disp_1d", "xsec_disp_30d",
+  "cs_rank_ret_1d", "cs_rank_ret_5d", "cs_rank_ret_20d",
+  "cs_rank_vol_63d", "cs_rank_vol_126d", "cs_rank_vol_252d", "cs_rank_vol_756d",
   "cs_rank_z_ma_20d",
 ];
 
@@ -199,22 +202,16 @@ function buildEquationFromShared(shared: SharedStats) {
     const raw = shared[key];
     const val = Number(raw ?? 0);
 
-    // skip zeros / near-zeros
     if (!Number.isFinite(val) || Math.abs(val) < EPS) continue;
 
     const sign = val >= 0 ? "+" : "-";
     pieces.push(` ${sign}${Math.abs(val).toFixed(6)}·${f}`);
   }
 
-  // If everything was zero, just show intercept
   if (pieces.length === 0) return `y = ${intercept.toFixed(6)}`;
 
   return `y = ${intercept.toFixed(6)}${pieces.join("")}`;
 }
-
-/** Type guard to narrow unknown → number */
-// const isFiniteNumber = (v: unknown): v is number =>
-//   typeof v === "number" && Number.isFinite(v);
 
 export function BetaDashboard() {
   const [summaryData, setSummaryData] = useState<BetaSummary[]>([]);
@@ -232,108 +229,71 @@ export function BetaDashboard() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
 
-
   // Modal state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // useEffect(() => {
-  // fetch(api("/api/factors/shared/"))
-  //   .then(res => res.json())
-  //   .then(setSharedStats)
-  //   .catch(() => {});
-  // }, []);
-
+  // Load shared/global factor stats (array or object supported)
   useEffect(() => {
-  fetch(api("/api/factors/shared/"))
-    .then(res => res.json())
-    .then(payload => setSharedStats(Array.isArray(payload) ? payload[0] : payload))
-    .catch(() => {});
+    fetch(api("factors/shared/"))
+      .then(res => res.json())
+      .then(payload => setSharedStats(Array.isArray(payload) ? payload[0] : payload))
+      .catch(() => {});
   }, []);
 
-
   // Load available analysis runs once
-    useEffect(() => {
-      (async () => {
-        try {
-          const data = await fetchRuns();
-          setRuns(data || []);
-          if (data?.length) setSelectedRunId(data[0].id);
-        } catch {}
-      })();
-    }, []);
-
   useEffect(() => {
-    // need both: shared stats id and a non-empty summary table
+    (async () => {
+      try {
+        const data = await fetchRuns();
+        setRuns(data || []);
+        if (data?.length) setSelectedRunId(data[0].id);
+      } catch {}
+    })();
+  }, []);
+
+  // Enrich summary rows with OOS stats when shared stats and table exist
+  useEffect(() => {
     const sharedId = (sharedStats as any)?.id as number | undefined;
     if (!sharedId || summaryData.length === 0) return;
 
     (async () => {
-    const oos = await fetchOOS(sharedId);
-    const byTicker = new Map(oos.map(r => [r.ticker, r]));
-    setSummaryData(prev =>
-      prev.map(row => {
-        const m = byTicker.get(row.ticker);
-        return m
-          ? {
-              ...row,
-              r2_oos: m.r2_oos ?? null,
-              rmse_oos: m.rmse_oos ?? null,
-              mae_oos: m.mae_oos ?? null,
-              diracc_oos: m.diracc_oos ?? null,
-              // keep these handy if you want later
-              predstd_oos: m.predstd_oos ?? row.predstd_oos ?? null,
-              n_oos: m.n_oos ?? row.n_oos ?? null,
-            }
-          : row;
-      })
-    );
-  })();
-
-    // depend on length to avoid loops when only values change
+      const oos = await fetchOOS(sharedId);
+      const byTicker = new Map(oos.map(r => [r.ticker, r]));
+      setSummaryData(prev =>
+        prev.map(row => {
+          const m = byTicker.get(row.ticker);
+          return m
+            ? {
+                ...row,
+                r2_oos: m.r2_oos ?? null,
+                rmse_oos: m.rmse_oos ?? null,
+                mae_oos: m.mae_oos ?? null,
+                diracc_oos: m.diracc_oos ?? null,
+                predstd_oos: m.predstd_oos ?? row.predstd_oos ?? null,
+                n_oos: m.n_oos ?? row.n_oos ?? null,
+              }
+            : row;
+        })
+      );
+    })();
   }, [sharedStats, summaryData.length]);
 
   async function fetchRuns() {
-    const res = await fetch(api("/api/analysis-runs/"), { credentials: "include" });
+    const res = await fetch(api("analysis-runs/"), { credentials: "include" });
     if (!res.ok) return [];
     return await res.json();
   }
 
-
-  // useEffect(() => {
-  //   if (!selectedRunId || !summaryData?.length) return;
-
-  //   (async () => {
-  //     try {
-  //       const res = await fetch(api(`/api/analysis-runs/${selectedRunId}/performance/`), { credentials: "include" });
-  //       if (!res.ok) return;
-  //       const payload = await res.json();
-  //       const rows = Array.isArray(payload?.results) ? payload.results : [];
-  //       const r2ByTicker = new Map(rows.map((r: any) => [r.ticker, r.r2_oos]));
-  //       setSummaryData(prev =>
-  //         Array.isArray(prev)
-  //           ? prev.map(row => ({ ...row, r2_oos: r2ByTicker.get(row.ticker) ?? row.r2_oos ?? null }))
-  //           : prev
-  //       );
-  //     } catch {}
-  //   })();
-  // }, [selectedRunId, summaryData?.length]);
-
-
-  // useEffect(() => {
-  // fetch(api(`/api/factor-stats/latest/summary?horizon=${horizon}`))
-  //   .then((res) => res.json())
-  //   .then(setSharedStats)
-  //   .catch(() => {});
-  //   }, [horizon]);
-
-  // add this helper near other API helpers
   async function fetchOOS(sharedId: number) {
-    const res = await fetch(api(`/api/factor-stats/${sharedId}/oos/?min_n=10&order=-r2_oos`), {
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-    });
+    const res = await fetch(
+      api(`factor-stats/${sharedId}/oos/?min_n=10&order=-r2_oos`),
+      {
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
     if (!res.ok) return [];
-      return (await res.json()) as Array<{
+    return (await res.json()) as Array<{
       ticker: string;
       r2_oos: number | null;
       rmse_oos?: number | null;
@@ -350,7 +310,7 @@ export function BetaDashboard() {
     setError("");
 
     try {
-      const response = await fetch(api("/api/factors/summary/"), {
+      const response = await fetch(api("factors/summary/"), {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
@@ -379,7 +339,7 @@ export function BetaDashboard() {
     setError("");
 
     const tryFetch = async (symbol: string) => {
-      const url = api(`/api/beta/timeseries/${seg(symbol)}/`);
+      const url = api(`beta/timeseries/${seg(symbol)}/`);
       return fetch(url, {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -392,11 +352,9 @@ export function BetaDashboard() {
 
       // If not found and ticker contains slash, try common aliases
       if (res.status === 404 && ticker.includes("/")) {
-        // 1) Replace slash with hyphen (e.g., BRK/B UN -> BRK-B UN)
         const aliasDash = ticker.replace(/\//g, "-").trim();
         res = await tryFetch(aliasDash);
 
-        // 2) If still not found, drop the slash entirely (e.g., BRK/B UN -> BRKB UN)
         if (res.status === 404) {
           const aliasNoSlash = ticker.replace(/\//g, "").trim();
           res = await tryFetch(aliasNoSlash);
@@ -404,7 +362,6 @@ export function BetaDashboard() {
       }
 
       if (!res.ok) {
-        // At this point, we surface a clear error for the modal
         const msg = `Failed to fetch time series data: ${res.status} ${res.statusText}`;
         setTimeSeriesData(null);
         throw new Error(msg);
@@ -424,7 +381,7 @@ export function BetaDashboard() {
   const handleTickerSelect = (ticker: string) => {
     setSelectedTicker(ticker);
     setIsDialogOpen(true);
-    setTimeSeriesData(null); // reset previous chart data while loading
+    setTimeSeriesData(null);
     fetchTimeSeriesData(ticker);
   };
 
@@ -436,11 +393,6 @@ export function BetaDashboard() {
   // Close dialog handler
   const handleDialogOpenChange = (open: boolean) => {
     setIsDialogOpen(open);
-    if (!open) {
-      // Optional: keep selection for context, or clear here.
-      // setSelectedTicker("");
-      // setTimeSeriesData(null);
-    }
   };
 
   return (
@@ -456,11 +408,11 @@ export function BetaDashboard() {
             <p className="text-sm text-gray-500 mt-1">Last updated: {lastUpdated.toLocaleString()}</p>
           )}
         </div>
-          {sharedStats && (
+        {sharedStats && (
           <Button variant="outline" size="sm" onClick={() => setShowMore((s) => !s)}>
             {showMore ? "Show less" : "Show more"}
           </Button>
-)}
+        )}
       </div>
 
       {/* Analysis files / runs selector */}
@@ -483,7 +435,6 @@ export function BetaDashboard() {
           </div>
         </div>
       )}
-
 
       {/* Error Alert */}
       {error && (
@@ -569,8 +520,6 @@ export function BetaDashboard() {
               })()}
             </CardContent>
           </Card>
-
-
         </div>
       )}
 
@@ -609,50 +558,24 @@ export function BetaDashboard() {
         </CardContent>
       </Card>
 
-
-      {/* Model Equation
-      <Card>
-        <CardHeader className="pb-1">
-          <CardTitle className="text-sm font-medium">Model Equation</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-xl font-bold">{sharedStats.model_equation ?? "N/A"}</div>
-          <p className="text-xs text-muted-foreground">Model Equation</p>
-        </CardContent>
-      </Card> */}
-
-      
       {/* Collapsible metrics */}
       {showMore && sharedStats && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 auto-rows-fr">
           {(() => {
-            // find top positive / negative coefficient keys to exclude
             const coefPairs = Object.entries(sharedStats).filter(
               ([k, v]) => k.startsWith("coef_") && isNonZero(v)
             ) as [string, number][];
-          
-
-            const topPos = coefPairs.length
-              ? [...coefPairs].sort((a, b) => b[1] - a[1])[0][0] // key only
-              : null;
-
-            const topNeg = coefPairs.length
-              ? [...coefPairs].sort((a, b) => a[1] - b[1])[0][0]
-              : null;
 
             const exclude = new Set<string>([
               "r2_global",
               "volatility_coeff",
               "y_intercept",
-              // topPos ?? "",
-              // topNeg ?? "",
             ]);
 
-            // collect the rest: all avg_* and coef_* remaining
             const rest = Object.entries(sharedStats)
               .filter(([k, v]) => (k.startsWith("avg_") || k.startsWith("coef_")) && !exclude.has(k))
-                .filter(([, v]) => isNonZero(v))   // hide zeros
-              .sort(([a], [b]) => a.localeCompare(b)); // simple stable order
+              .filter(([, v]) => isNonZero(v))
+              .sort(([a], [b]) => a.localeCompare(b));
 
             return rest.map(([k, v]) => (
               <Card key={k} className="w-full min-w-0">
@@ -670,7 +593,6 @@ export function BetaDashboard() {
           })()}
         </div>
       )}
-
 
       {/* Summary Table (clicking a ticker opens the dialog) */}
       <BetaSummaryTable data={summaryData} loading={loading} onTickerSelect={handleTickerSelect} />
@@ -715,4 +637,3 @@ export function BetaDashboard() {
     </div>
   );
 }
-
