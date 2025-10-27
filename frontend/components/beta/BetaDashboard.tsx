@@ -170,6 +170,7 @@ const prettyKey = (k: string) =>
     .replace(/_/g, " ");
 
 const EPS = 1e-12;
+const fmtWeight = (v: number) => (Math.abs(v) < EPS ? "N/A" : v.toFixed(4));
 const isNonZero = (v: unknown) =>
   Number.isFinite(Number(v)) && Math.abs(Number(v as number)) > EPS;
 
@@ -230,11 +231,25 @@ export function BetaDashboard() {
 
     (async () => {
     const oos = await fetchOOS(sharedId);
-    const byTicker = new Map(oos.map(r => [r.ticker, r.r2_oos]));
+    const byTicker = new Map(oos.map(r => [r.ticker, r]));
     setSummaryData(prev =>
-      prev.map(row => ({ ...row, r2_oos: byTicker.get(row.ticker) ?? row?.r2_oos ?? null }))
+      prev.map(row => {
+        const m = byTicker.get(row.ticker);
+        return m
+          ? {
+              ...row,
+              r2_oos: m.r2_oos ?? null,
+              rmse_oos: m.rmse_oos ?? null,
+              mae_oos: m.mae_oos ?? null,
+              diracc_oos: m.diracc_oos ?? null,
+              // keep these handy if you want later
+              predstd_oos: m.predstd_oos ?? row.predstd_oos ?? null,
+              n_oos: m.n_oos ?? row.n_oos ?? null,
+            }
+          : row;
+      })
     );
-    })();
+  })();
 
     // depend on length to avoid loops when only values change
   }, [sharedStats, summaryData.length]);
@@ -280,7 +295,15 @@ export function BetaDashboard() {
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return [];
-    return (await res.json()) as Array<{ ticker: string; r2_oos: number | null }>;
+      return (await res.json()) as Array<{
+      ticker: string;
+      r2_oos: number | null;
+      rmse_oos?: number | null;
+      mae_oos?: number | null;
+      diracc_oos?: number | null;
+      predstd_oos?: number | null;
+      n_oos?: number | null;
+    }>;
   }
 
   /** Summary fetch */
@@ -473,10 +496,12 @@ export function BetaDashboard() {
                   return <div className="text-sm text-gray-500">N/A</div>;
                 }
                 const top = [...coefEntries].sort((a, b) => b[1] - a[1])[0];
+                const topVal = Number(top[1]);
+                const isZeroish = Math.abs(topVal) < EPS;
                 return (
                   <>
-                    <div className="text-2xl font-bold">{top[0].replace("coef_", "")}</div>
-                    <p className="text-xs text-muted-foreground">Weight: {top[1].toFixed(4)}</p>
+                    <div className="text-2xl font-bold">{isZeroish ? "N/A" : top[0].replace("coef_", "")}</div>
+                    <p className="text-xs text-muted-foreground">Weight: {fmtWeight(topVal)}</p>
                   </>
                 );
               })()}
@@ -500,17 +525,60 @@ export function BetaDashboard() {
                 return (
                   <>
                     <div className="text-2xl font-bold">{bottom[0].replace("coef_", "")}</div>
-                    <p className="text-xs text-muted-foreground">Weight: {bottom[1].toFixed(4)}</p>
+                    <p className="text-xs text-muted-foreground">Weight: {fmtWeight(bottom[1])}</p>
                   </>
                 );
               })()}
             </CardContent>
           </Card>
 
-          
 
         </div>
       )}
+
+      {/* Model Equation */}
+      <Card className="md:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Model Equation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(() => {
+            const raw = String(sharedStats?.model_equation ?? "");
+            // remove terms like "+ 0·feature" or "- 0.000000·feature"
+            const cleaned =
+              raw
+                .replace(/([+\-]\s*)0+(?:\.0+)?·[^+\-]+/g, "") // drop zero-coefficient terms
+                .replace(/\s{2,}/g, " ")                       // tidy spaces
+                .replace(/\+\s-\s/g, "- ")                     // "+ -" → "-"
+                .trim() || "y = 0";
+
+            return (
+              <>
+                <div
+                  className="font-mono text-sm whitespace-pre-wrap break-words max-h-40 overflow-auto rounded border p-2"
+                  title={cleaned}
+                >
+                  {cleaned}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  ElasticNet regression form used for current run
+                </p>
+                {raw && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => navigator.clipboard.writeText(cleaned)}
+                  >
+                    Copy equation
+                  </Button>
+                )}
+              </>
+            );
+          })()}
+        </CardContent>
+      </Card>
+
 
       {/* Model Equation
       <Card>
@@ -546,8 +614,8 @@ export function BetaDashboard() {
               "r2_global",
               "volatility_coeff",
               "y_intercept",
-              topPos ?? "",
-              topNeg ?? "",
+              // topPos ?? "",
+              // topNeg ?? "",
             ]);
 
             // collect the rest: all avg_* and coef_* remaining
