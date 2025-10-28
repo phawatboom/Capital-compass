@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TrendingUp, TrendingDown, Minus, BarChart3 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 /**
  * A single row in the summary table. All fields that the table displays or sorts by
@@ -76,19 +78,30 @@ export interface BetaSummaryRow {
   diracc_oos?: number | null;
   predstd_oos?: number | null;
   n_oos?: number | null;
-  
 }
 
 export interface BetaSummaryTableProps {
   data?: BetaSummaryRow[];
   loading?: boolean;
   onTickerSelect?: (ticker: string) => void;
+
+  /** Table horizon filter (rendered in-table; state lives in parent) */
+  horizons?: number[];
+  selectedHorizons?: number[];
+  onSelectedHorizonsChange?: (hs: number[]) => void;
 }
 
 // All sortable fields (must match keys in BetaSummaryRow)
 type SortableField = keyof BetaSummaryRow;
 
-export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }: BetaSummaryTableProps) {
+export function BetaSummaryTable({
+  data = [],
+  loading = false,
+  onTickerSelect,
+  horizons,
+  selectedHorizons,
+  onSelectedHorizonsChange,
+}: BetaSummaryTableProps) {
   const [filteredData, setFilteredData] = useState<BetaSummaryRow[]>(data);
   const [searchTicker, setSearchTicker] = useState('');
   const [confidenceFilter, setConfidenceFilter] = useState('all');
@@ -96,7 +109,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // NEW: rows per page selector (20 default; 50, 100, All available)
+  // Rows per page selector
   const [rowsPerPage, setRowsPerPage] = useState<number | 'all'>(20);
 
   // Recompute filtered + sorted data whenever inputs change
@@ -109,19 +122,19 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
       working = working.filter((row) => row.ticker.toLowerCase().includes(q));
     }
 
-    // Confidence filter (if your data provides it)
+    // Confidence filter (kept for future use)
     if (confidenceFilter !== 'all') {
       working = working.filter((row) => row.confidence_level === confidenceFilter);
     }
 
-    // Sorting
+    // Sorting helpers
     const isStringField = (f: SortableField) => f === 'ticker';
     const isDateLikeField = (f: SortableField) => f === 'created_at' || f === 'latest_date';
 
     const toNumber = (row: BetaSummaryRow, f: SortableField): number => {
       if (isDateLikeField(f)) {
         const s = (row[f] as string | null | undefined) ?? null;
-        return s ? new Date(s).getTime() : Number.NEGATIVE_INFINITY; // nulls/undefined go to the end
+        return s ? new Date(s).getTime() : Number.NEGATIVE_INFINITY; // nulls/undefined last
       }
       const v = row[f] as number | null | undefined;
       return typeof v === 'number' ? v : Number.NEGATIVE_INFINITY;
@@ -171,6 +184,32 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
     return num.toFixed(decimals);
   };
 
+  // Checkbox horizon control wiring
+  const allHorizons = horizons ?? [];
+  const selectedHs = selectedHorizons ?? [];
+  const canUseHorizonControl =
+    allHorizons.length > 0 && onSelectedHorizonsChange !== undefined;
+
+  const toggleHorizon = (h: number, checked: boolean) => {
+    if (!onSelectedHorizonsChange) return;
+    if (checked) {
+      const next = Array.from(new Set([...selectedHs, h])).sort((a, b) => a - b);
+      onSelectedHorizonsChange(next);
+    } else {
+      onSelectedHorizonsChange(selectedHs.filter((x) => x !== h));
+    }
+  };
+
+  const selectAllHorizons = () => {
+    if (!onSelectedHorizonsChange) return;
+    onSelectedHorizonsChange([...allHorizons].sort((a, b) => a - b));
+  };
+
+  const clearAllHorizons = () => {
+    if (!onSelectedHorizonsChange) return;
+    onSelectedHorizonsChange([]);
+  };
+
   if (loading) {
     return (
       <Card>
@@ -198,38 +237,72 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
       </CardHeader>
 
       <CardContent>
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-4 mb-6">
-          <div className="flex-1 min-w-[220px]">
+        {/* Toolbar: grid makes alignment predictable across breakpoints */}
+        <div className="grid gap-4 items-center mb-6 grid-cols-1 md:grid-cols-[minmax(260px,1fr)_auto_auto]">
+          {/* Search (left, grows) */}
+          <div className="min-w-[220px]">
             <Input
-              placeholder="Search ticker..."
+              placeholder="Search ticker…"
               value={searchTicker}
               onChange={(e) => setSearchTicker(e.target.value)}
-              className="max-w-sm"
+              className="h-9"
             />
           </div>
 
-          {/* Example (kept commented) confidence filter */}
-          {/* <Select value={confidenceFilter} onValueChange={setConfidenceFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Confidence Level" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Confidence</SelectItem>
-              <SelectItem value="High">High Confidence</SelectItem>
-              <SelectItem value="Medium">Medium Confidence</SelectItem>
-              <SelectItem value="Low">Low Confidence</SelectItem>
-            </SelectContent>
-          </Select> */}
+          {/* Horizon checkboxes (center) */}
+          {canUseHorizonControl ? (
+            <div
+              className="flex items-center gap-3 flex-wrap"
+              role="group"
+              aria-labelledby="hz-filter-label"
+            >
+              <span id="hz-filter-label" className="text-sm text-muted-foreground shrink-0">
+                Horizon (table):
+              </span>
 
-          {/* NEW: Rows per page selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">Rows:</span>
+              {/* All / None actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={selectAllHorizons}>
+                  All
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={clearAllHorizons}>
+                  None
+                </Button>
+              </div>
+
+              {/* Checkbox list — inline, wraps neatly */}
+              <div className="flex flex-wrap items-center gap-3 max-w-[68rem]">
+                {allHorizons.map((h) => {
+                  const id = `hz-${h}`;
+                  const checked = selectedHs.includes(h);
+                  return (
+                    <div key={id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={id}
+                        checked={checked}
+                        onCheckedChange={(v) => toggleHorizon(h, v === true)}
+                        className="h-4 w-4"
+                      />
+                      <Label htmlFor={id} className="text-sm leading-none">
+                        {h}d
+                      </Label>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div />
+          )}
+
+          {/* Rows selector (right) */}
+          <div className="flex items-center gap-2 justify-start md:justify-end">
+            <span className="text-sm text-muted-foreground">Rows:</span>
             <Select
               value={rowsPerPage === 'all' ? 'all' : String(rowsPerPage)}
               onValueChange={(v) => setRowsPerPage(v === 'all' ? 'all' : Number(v))}
             >
-              <SelectTrigger className="w-[120px]">
+              <SelectTrigger className="w-[120px] h-9">
                 <SelectValue placeholder="Rows" />
               </SelectTrigger>
               <SelectContent>
@@ -243,7 +316,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
         </div>
 
         {/* Results Summary */}
-        <div className="mb-4 text-sm text-gray-600">
+        <div className="mb-4 text-sm text-muted-foreground">
           Showing {rowsPerPage === 'all' ? filteredData.length : paginatedData.length} of {filteredData.length} filtered stocks
           {filteredData.length !== data.length ? ` (from ${data.length} total)` : ''}
         </div>
@@ -264,6 +337,11 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                   Created At {sortField === 'created_at' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
 
+                {/* Horizon immediately to the right of Created At */}
+                <TableHead onClick={() => handleSort('horizon_days')} className="cursor-pointer hover:bg-gray-50">
+                  Horizon (d) {sortField === 'horizon_days' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </TableHead>
+
                 <TableHead onClick={() => handleSort('b_coefficient')} className="cursor-pointer hover:bg-gray-50">
                   β Coefficient {sortField === 'b_coefficient' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
@@ -273,8 +351,8 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                 <TableHead onClick={() => handleSort('r2_oos')} className="cursor-pointer hover:bg-gray-50">
                   R2 OOS {sortField === 'r2_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
-                
-                {/* add these three right after R2 OOS */}
+
+                {/* Next three right after R2 OOS */}
                 <TableHead onClick={() => handleSort('rmse_oos')} className="cursor-pointer hover:bg-gray-50">
                   RMSE OOS {sortField === 'rmse_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
@@ -363,76 +441,79 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
                 <TableHead onClick={() => handleSort('xsec_disp_30d')} className="cursor-pointer hover:bg-gray-50">
                   XSec 30d {sortField === 'xsec_disp_30d' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
-                <TableHead onClick={() => handleSort('horizon_days')} className="cursor-pointer hover:bg-gray-50">
-                  Horizon (d) {sortField === 'horizon_days' && (sortOrder === 'asc' ? '↑' : '↓')}
-                </TableHead>
-
               </TableRow>
             </TableHeader>
 
             <TableBody>
-              {paginatedData.map((item) => (
-                <TableRow key={item.ticker}>
-                  <TableCell className="sticky left-0 z-20 bg-background w-36 min-w-[9rem] border-r">
-                    <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
-                      {item.ticker}
-                    </Button>
-                  </TableCell>
+              {paginatedData.map((item) => {
+                const rowKey = `${item.ticker}::${item.horizon_days ?? 'na'}::${item.created_at ?? ''}`;
+                return (
+                  <TableRow key={rowKey}>
+                    <TableCell className="sticky left-0 z-20 bg-background w-36 min-w-[9rem] border-r">
+                      <Button variant="outline" size="sm" onClick={() => onTickerSelect?.(item.ticker)}>
+                        {item.ticker}
+                      </Button>
+                    </TableCell>
 
-                  <TableCell>
-                    {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
-                  </TableCell>
+                    <TableCell>
+                      {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}
+                    </TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.b_coefficient)}</TableCell>
+                    {/* Horizon right after Created At */}
+                    <TableCell className="font-mono">{item.horizon_days ?? '—'}</TableCell>
 
-                  {/* Trend icon from β coefficient */}
-                  <TableCell>
-                    {item.b_coefficient === null || item.b_coefficient === undefined || item.b_coefficient === 0 ? (
-                      <Minus className="h-4 w-4 text-gray-400" />
-                    ) : item.b_coefficient > 0 ? (
-                      <TrendingUp className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <TrendingDown className="h-4 w-4 text-red-600" />
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.r2_oos)}</TableCell>
- 
-                  {/* add these three cells right after */}
-                  <TableCell className="font-mono">{formatNumber(item.rmse_oos)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.mae_oos)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.diracc_oos)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.b_coefficient)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.volatility)}</TableCell>
+                    {/* Trend icon from β coefficient */}
+                    <TableCell>
+                      {item.b_coefficient === null || item.b_coefficient === undefined || item.b_coefficient === 0 ? (
+                        <Minus className="h-4 w-4 text-gray-400" />
+                      ) : item.b_coefficient > 0 ? (
+                        <TrendingUp className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <TrendingDown className="h-4 w-4 text-red-600" />
+                      )}
+                    </TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.train_b)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.lag_train_b)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.r2_oos)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.ar1_corr_10d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.ar1_corr_20d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.ar1_corr_60d)}</TableCell>
+                    {/* OOS metrics */}
+                    <TableCell className="font-mono">{formatNumber(item.rmse_oos)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.mae_oos)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.diracc_oos)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.sign_persist_20d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.sign_persist_60d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.volatility)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.ret_1d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.ret_5d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.ret_20d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.train_b)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.lag_train_b)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.vol_63d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.vol_126d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.vol_252d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.vol_756d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.ar1_corr_10d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.ar1_corr_20d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.ar1_corr_60d)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.Z_ma_20d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.sign_persist_20d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.sign_persist_60d)}</TableCell>
 
-                  <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_1d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_5d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_20d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.xsec_disp_1d)}</TableCell>
-                  <TableCell className="font-mono">{formatNumber(item.xsec_disp_30d)}</TableCell>
-                  <TableCell className="font-mono">{item.horizon_days ?? '—'}</TableCell>
-                </TableRow>
-              ))}
+                    <TableCell className="font-mono">{formatNumber(item.ret_1d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.ret_5d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.ret_20d)}</TableCell>
+
+                    <TableCell className="font-mono">{formatNumber(item.vol_63d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.vol_126d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.vol_252d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.vol_756d)}</TableCell>
+
+                    <TableCell className="font-mono">{formatNumber(item.Z_ma_20d)}</TableCell>
+
+                    <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_1d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_5d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.cs_rank_ret_20d)}</TableCell>
+
+                    <TableCell className="font-mono">{formatNumber(item.xsec_disp_1d)}</TableCell>
+                    <TableCell className="font-mono">{formatNumber(item.xsec_disp_30d)}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -449,7 +530,7 @@ export function BetaSummaryTable({ data = [], loading = false, onTickerSelect }:
               Previous
             </Button>
 
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-muted-foreground">
               Page {currentPage} of {totalPages}
             </span>
 

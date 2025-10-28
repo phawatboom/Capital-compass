@@ -18,6 +18,7 @@ from pathlib import Path
 import logging # <-- Add logging
 
 from django.db.models import Avg
+from django.shortcuts import get_object_or_404
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from .models import Stock, StockData, CSVUploadRecord, UserProfile, AnalysisResult, ForecastResult, BacktestResult, BetaForecastResult, MeanReversionResult, FactorSharedStats, StockFactorResult, StockPerformanceMetrics
 from datetime import date, datetime
 from django.contrib.auth import update_session_auth_hash
+from django.shortcuts import get_object_or_404
 from rest_framework.decorators import parser_classes
 from .model_runner import run_analysis_from_web
 
@@ -911,9 +913,15 @@ def factor_shared(request):
 
 
 
+# views.py  (replace factor_summary with this)
 @api_view(["GET"])
 def factor_summary(request):
-    """Returns latest per-ticker results for the most recent FactorSharedStats record."""
+    """
+    Return per-ticker results for a specific FactorSharedStats:
+      - ?shared_id=<int> has precedence
+      - else ?horizon=<int> picks latest for that horizon
+      - else falls back to latest created across all horizons
+    """
     import math
 
     def safe_json(obj):
@@ -921,48 +929,80 @@ def factor_summary(request):
             if math.isnan(obj) or math.isinf(obj):
                 return None
             return obj
-        elif isinstance(obj, list):
+        if isinstance(obj, list):
             return [safe_json(x) for x in obj]
-        elif isinstance(obj, dict):
+        if isinstance(obj, dict):
             return {k: safe_json(v) for k, v in obj.items()}
         return obj
 
-    try:
-        latest_shared = FactorSharedStats.objects.latest("created_at")
-        stock_results = (
-            StockFactorResult.objects
-            .filter(shared_stats=latest_shared)
-            .order_by("ticker", "-created_at")
-            .distinct("ticker")
-        )
-        serializer = StockFactorResultSerializer(stock_results, many=True)
-        cleaned_data = safe_json(serializer.data)
-        return Response({"summary": cleaned_data})
-    except FactorSharedStats.DoesNotExist:
-        return Response({"summary": []})
+    shared_id = request.GET.get("shared_id")
+    horizon_q = request.GET.get("horizon")
+
+    if shared_id:
+        shared = get_object_or_404(FactorSharedStats, pk=int(shared_id))
+    elif horizon_q:
+        shared = (FactorSharedStats.objects
+                  .filter(horizon_days=int(horizon_q))
+                  .order_by("-created_at")
+                  .first())
+        if not shared:
+            return Response({"summary": [], "shared_id": None, "horizon": int(horizon_q)})
+    else:
+        shared = FactorSharedStats.objects.latest("created_at")
+
+    stock_results = (
+        StockFactorResult.objects
+        .filter(shared_stats=shared)
+        .order_by("ticker", "-created_at")
+        .distinct("ticker")
+    )
+    serializer = StockFactorResultSerializer(stock_results, many=True)
+    cleaned = safe_json(serializer.data)
+
+    return Response({
+        "summary": cleaned,
+        "shared_id": shared.id,
+        "horizon": shared.horizon_days,
+        "created_at": shared.created_at,
+    })
 
 
-@api_view(['GET'])
+# views.py  (replace beta_timeseries with this)
+@api_view(["GET"])
 def beta_timeseries(request, ticker):
     ticker = ticker.strip().upper()
-    qs = StockFactorResult.objects.filter(ticker__iexact=ticker).order_by("created_at")
+    shared_id = request.GET.get("shared_id")
+    horizon_q = request.GET.get("horizon")
 
+    qs = StockFactorResult.objects.filter(ticker__iexact=ticker)
+
+    if shared_id:
+        qs = qs.filter(shared_stats_id=int(shared_id))
+    elif horizon_q:
+        qs = qs.filter(shared_stats__horizon_days=int(horizon_q))
+    else:
+        latest_shared = FactorSharedStats.objects.latest("created_at")
+        qs = qs.filter(shared_stats=latest_shared)
+
+    qs = qs.order_by("created_at")
     if not qs.exists():
-        return Response({"detail": f"No time series found for ticker {ticker}."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"detail": f"No time series found for ticker {ticker}."}, status=404)
 
     serializer = StockFactorTimeSeriesSerializer(qs, many=True)
     data = serializer.data
 
-    # Adapt to chart structure
-    response = {
+    return Response({
         "ticker": ticker,
+        "horizon": data[0].get("horizon_days"),
         "dates": [row["created_at"] for row in data],
         "beta_pred": [row["b_coefficient"] for row in data],
-        "beta_true": [None for _ in data],  # placeholder until actual betas available
-        "confidence_bands": [{"lower": row["b_coefficient"] - 0.02, "upper": row["b_coefficient"] + 0.02} for row in data]
-    }
+        "beta_true": [None for _ in data],  # placeholder
+        "confidence_bands": [
+            {"lower": row["b_coefficient"] - 0.02, "upper": row["b_coefficient"] + 0.02}
+            for row in data
+        ],
+    })
 
-    return Response(response, status=status.HTTP_200_OK)
 
 @api_view(["GET"])
 def latest_summary(request):
