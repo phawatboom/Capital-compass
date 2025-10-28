@@ -247,6 +247,7 @@ class BetaCoefficientTimeSeriesSerializer(serializers.Serializer):
 
 
 class FactorSharedStatsSerializer(serializers.ModelSerializer):
+    y_intercept = serializers.FloatField(source="intercept_raw", read_only=True)  # <-- add this line
     class Meta:
         model = FactorSharedStats
         fields = "__all__"

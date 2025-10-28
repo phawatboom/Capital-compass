@@ -614,7 +614,7 @@ export function BetaDashboard() {
                 <details className="mt-2">
                   <summary className="cursor-pointer">Parameters passed to the model</summary>
                   <pre className="mt-2 text-xs whitespace-pre-wrap break-words border rounded p-2">
-{JSON.stringify(sharedStats.run_params, null, 2)}
+                {JSON.stringify(sharedStats.run_params, null, 2)}
                   </pre>
                 </details>
               )}
@@ -681,7 +681,7 @@ export function BetaDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {typeof sharedStats.y_intercept === "number" ? sharedStats.y_intercept.toFixed(3) : "N/A"}
+                {fmtNum(sharedStats?.y_intercept)}
               </div>
               <p className="text-xs text-muted-foreground">Baseline term</p>
             </CardContent>
