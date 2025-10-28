@@ -490,18 +490,11 @@ export function BetaDashboard() {
 
   const tableData = useMemo(() => makeTableSafeRows(summaryData), [summaryData]);
 
-  return (
+  // @ts-ignore
+    // @ts-ignore
+    return (
     <div className="space-y-6">
-      {usingDefaultApiBase && (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertDescription>
-            Using default API base <code>/api</code>. Set{" "}
-            <code>NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000</code> in{" "}
-            <code>.env.local</code> and restart the dev server.
-          </AlertDescription>
-        </Alert>
-      )}
+
 
       {/* Header */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

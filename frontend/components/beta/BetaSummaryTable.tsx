@@ -363,10 +363,6 @@ export function BetaSummaryTable({
                   DirAcc OOS {sortField === 'diracc_oos' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </TableHead>
 
-                <TableHead onClick={() => handleSort('volatility')} className="cursor-pointer hover:bg-gray-50">
-                  Volatility {sortField === 'volatility' && (sortOrder === 'asc' ? '↑' : '↓')}
-                </TableHead>
-
                 {/* Core factors */}
                 <TableHead onClick={() => handleSort('train_b')} className="cursor-pointer hover:bg-gray-50">
                   Train β {sortField === 'train_b' && (sortOrder === 'asc' ? '↑' : '↓')}
@@ -481,8 +477,6 @@ export function BetaSummaryTable({
                     <TableCell className="font-mono">{formatNumber(item.rmse_oos)}</TableCell>
                     <TableCell className="font-mono">{formatNumber(item.mae_oos)}</TableCell>
                     <TableCell className="font-mono">{formatNumber(item.diracc_oos)}</TableCell>
-
-                    <TableCell className="font-mono">{formatNumber(item.volatility)}</TableCell>
 
                     <TableCell className="font-mono">{formatNumber(item.train_b)}</TableCell>
                     <TableCell className="font-mono">{formatNumber(item.lag_train_b)}</TableCell>
