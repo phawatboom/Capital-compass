@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { BetaSummaryTable } from "@/components/beta/BetaSummaryTable";
 import { BetaTimeSeriesChart } from "@/components/beta/BetaTimeSeriesChart";
 import {
@@ -227,6 +227,9 @@ export function BetaDashboard() {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
+  /** Track which horizons we have already hydrated with OOS metrics */
+  const oosHydratedRef = useRef<Set<number>>(new Set());
+
   const selectedRun = useMemo(
     () => runs.find((r) => r.id === selectedRunId) || null,
     [runs, selectedRunId]
@@ -310,6 +313,7 @@ export function BetaDashboard() {
     }
   }, [selectedRunId, selectedRun]);
 
+  /** Fetch shared stats for the single active horizon (used for KPIs/equation) */
   useEffect(() => {
     let cancelled = false;
 
@@ -350,52 +354,6 @@ export function BetaDashboard() {
     };
   }, [horizon]);
 
-  useEffect(() => {
-    const sharedId = (sharedStats as any)?.id as number | undefined;
-    const sharedH = (sharedStats as any)?.horizon_days as number | undefined;
-    if (!sharedId || !sharedH) return;
-    if (summaryData.length === 0) return;
-
-    (async () => {
-      try {
-        const res = await fetch(api(`factor-stats/${sharedId}/oos/?min_n=10`), {
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-        });
-        if (!res.ok) throw new Error(`oos ${res.status} ${res.statusText}`);
-        const oos = (await res.json()) as Array<{
-          ticker: string;
-          r2_oos: number | null;
-          rmse_oos?: number | null;
-          mae_oos?: number | null;
-          diracc_oos?: number | null;
-          predstd_oos?: number | null;
-          n_oos?: number | null;
-        }>;
-        const byTicker = new Map(oos.map((r) => [r.ticker, r]));
-        setSummaryData((prev) =>
-          prev.map((row) => {
-            if (row.horizon_days !== sharedH) return row;
-            const m = byTicker.get(row.ticker);
-            return m
-              ? {
-                  ...row,
-                  r2_oos: m.r2_oos ?? null,
-                  rmse_oos: m.rmse_oos ?? null,
-                  mae_oos: m.mae_oos ?? null,
-                  diracc_oos: m.diracc_oos ?? null,
-                  predstd_oos: m.predstd_oos ?? row.predstd_oos ?? null,
-                  n_oos: m.n_oos ?? row.n_oos ?? null,
-                }
-              : row;
-          })
-        );
-      } catch (e: any) {
-        setError((prev) => prev || e?.message || "Failed to fetch OOS metrics");
-      }
-    })();
-  }, [sharedStats, summaryData.length]);
-
   /** Fetch and merge summary rows for the horizons selected in the table control */
   useEffect(() => {
     const fetchSummaryDataMulti = async (hs: number[]) => {
@@ -419,6 +377,8 @@ export function BetaDashboard() {
         }
         setSummaryData(merged);
         setLastUpdated(new Date());
+        // table horizons changed; allow re-hydration for new horizons only
+        // (do not clear previously hydrated horizons)
       } catch (err: any) {
         setSummaryData([]);
         setError(err?.message ?? "Failed to fetch summary data");
@@ -434,6 +394,114 @@ export function BetaDashboard() {
     fetchSummaryDataMulti(selectedTableHorizons);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTableHorizons.join(",")]);
+
+  /** NEW: Hydrate OOS metrics for ALL horizons currently present in summaryData */
+  useEffect(() => {
+    // Find unique horizons in the data
+    const horizonsInData = Array.from(
+      new Set(
+        summaryData
+          .map((r) => r.horizon_days)
+          .filter((v): v is number => typeof v === "number")
+      )
+    );
+
+    // Only fetch for horizons not yet hydrated
+    const toFetch = horizonsInData.filter((h) => !oosHydratedRef.current.has(h));
+    if (toFetch.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // 1) fetch shared stats IDs for all horizons in parallel
+        const sharedResults = await Promise.all(
+          toFetch.map(async (h) => {
+            try {
+              const res = await fetch(api(`factor-stats/latest/summary/?horizon=${h}`), {
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+              });
+              if (!res.ok) return { h, id: undefined as number | undefined };
+              const payload = (await res.json()) as SharedStats;
+              return { h, id: (payload as any)?.id as number | undefined };
+            } catch {
+              return { h, id: undefined as number | undefined };
+            }
+          })
+        );
+
+        const valid = sharedResults.filter((x) => typeof x.id === "number") as Array<{
+          h: number;
+          id: number;
+        }>;
+
+        // 2) for each valid shared id, fetch OOS metrics in parallel
+        const oosBatches = await Promise.all(
+          valid.map(async ({ h, id }) => {
+            try {
+              const res = await fetch(api(`factor-stats/${id}/oos/?min_n=10`), {
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+              });
+              if (!res.ok) return { h, rows: [] as any[] };
+              const rows = (await res.json()) as Array<{
+                ticker: string;
+                r2_oos: number | null;
+                rmse_oos?: number | null;
+                mae_oos?: number | null;
+                diracc_oos?: number | null;
+                predstd_oos?: number | null;
+                n_oos?: number | null;
+              }>;
+              return { h, rows };
+            } catch {
+              return { h, rows: [] as any[] };
+            }
+          })
+        );
+
+        if (cancelled) return;
+
+        // 3) merge by horizon + ticker
+        setSummaryData((prev) => {
+          let out = prev;
+          for (const { h, rows } of oosBatches) {
+            if (!rows.length) {
+              oosHydratedRef.current.add(h);
+              continue;
+            }
+            const byTicker = new Map(rows.map((r) => [r.ticker, r]));
+            out = out.map((row) => {
+              if (row.horizon_days !== h) return row;
+              const m = byTicker.get(row.ticker);
+              return m
+                ? {
+                    ...row,
+                    r2_oos: m.r2_oos ?? null,
+                    rmse_oos: m.rmse_oos ?? null,
+                    mae_oos: m.mae_oos ?? null,
+                    diracc_oos: m.diracc_oos ?? null,
+                    predstd_oos: m.predstd_oos ?? row.predstd_oos ?? null,
+                    n_oos: m.n_oos ?? row.n_oos ?? null,
+                  }
+                : row;
+            });
+            oosHydratedRef.current.add(h);
+          }
+          return out;
+        });
+      } catch (e: any) {
+        if (!cancelled) {
+          setError((prev) => prev || e?.message || "Failed to fetch OOS metrics");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [summaryData]); // runs whenever the table data changes
 
   const handleDialogOpenChange = (open: boolean) => setIsDialogOpen(open);
 
@@ -491,11 +559,9 @@ export function BetaDashboard() {
   const tableData = useMemo(() => makeTableSafeRows(summaryData), [summaryData]);
 
   // @ts-ignore
-    // @ts-ignore
-    return (
+  // @ts-ignore
+  return (
     <div className="space-y-6">
-
-
       {/* Header */}
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
