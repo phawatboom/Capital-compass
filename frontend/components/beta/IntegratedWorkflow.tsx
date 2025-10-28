@@ -1179,7 +1179,7 @@ export function IntegratedWorkflow({ onResultsReady, fileId }: IntegratedWorkflo
                 </>
               ) : (
                 <>
-                  <Play className="mr-2 h-4 w-4" /> Run Universal Beta Model
+                  <Play className="mr-2 h-4 w-4" /> Predict
                 </>
               )}
             </Button>

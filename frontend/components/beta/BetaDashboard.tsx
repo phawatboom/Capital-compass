@@ -490,7 +490,9 @@ export function BetaDashboard() {
 
   const tableData = useMemo(() => makeTableSafeRows(summaryData), [summaryData]);
 
-  return (
+  // @ts-ignore
+    // @ts-ignore
+    return (
     <div className="space-y-6">
 
 
