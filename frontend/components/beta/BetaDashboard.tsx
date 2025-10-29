@@ -354,6 +354,16 @@ export function BetaDashboard() {
     };
   }, [horizon]);
 
+
+  const normalizeTicker = (s: string) =>
+  String(s)
+    .trim()
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")  // strip zero-widths
+    .replace(/\//g, "-")                         // BRK/B -> BRK-B
+    .replace(/\./g, "")                          // RDS.A -> RDSA
+    .replace(/\s+/g, "")                         // "A UN" -> "AUN"
+    .toUpperCase();
+
   /** Fetch and merge summary rows for the horizons selected in the table control */
   useEffect(() => {
     const fetchSummaryDataMulti = async (hs: number[]) => {
@@ -377,6 +387,7 @@ export function BetaDashboard() {
         }
         setSummaryData(merged);
         setLastUpdated(new Date());
+        oosHydratedRef.current.clear();  
         // table horizons changed; allow re-hydration for new horizons only
         // (do not clear previously hydrated horizons)
       } catch (err: any) {
@@ -389,6 +400,7 @@ export function BetaDashboard() {
 
     if (selectedTableHorizons.length === 0) {
       setSummaryData([]);
+      oosHydratedRef.current.clear();
       return;
     }
     fetchSummaryDataMulti(selectedTableHorizons);
@@ -468,13 +480,13 @@ export function BetaDashboard() {
           let out = prev;
           for (const { h, rows } of oosBatches) {
             if (!rows.length) {
-              oosHydratedRef.current.add(h);
+              // oosHydratedRef.current.add(h);
               continue;
             }
-            const byTicker = new Map(rows.map((r) => [r.ticker, r]));
+            const byTicker = new Map(rows.map((r) => [normalizeTicker(r.ticker), r]));
             out = out.map((row) => {
               if (row.horizon_days !== h) return row;
-              const m = byTicker.get(row.ticker);
+              const m = byTicker.get(normalizeTicker(row.ticker));
               return m
                 ? {
                     ...row,
