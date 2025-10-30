@@ -91,12 +91,16 @@ def factor_stats_latest_summary(request):
 @api_view(["GET"])
 def factor_stats_oos_table(request, pk: int):
     order = request.GET.get("order", "-r2_oos")
-    min_n = int(request.GET.get("min_n", 10))
+    # min_n = int(request.GET.get("min_n", 1))
     allowed = {"r2_oos","rmse_oos","mae_oos","mase_oos","diracc_oos","predstd_oos","n_oos"}
-    qs = StockOOSMetric.objects.filter(shared_stats_id=pk, n_oos__gte=min_n)
+
+    qs = StockOOSMetric.objects
     if order.lstrip("-") in allowed:
         qs = qs.order_by(order)
-    return Response(list(qs.values("ticker","r2_oos","rmse_oos","mae_oos","mase_oos","diracc_oos","predstd_oos","n_oos")))
+    return Response(list(qs.values(
+        "ticker","r2_oos","rmse_oos","mae_oos","mase_oos",
+        "diracc_oos","predstd_oos","n_oos"
+    )))
 
 from .serializers import (
     CSVUploadSerializer,
