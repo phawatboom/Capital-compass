@@ -1,7 +1,7 @@
-# Capital Compass, a Beta Coefficient Prediction Platform
+# Capital Compass — Beta Coefficient Prediction Platform
 
 
-A web application for forecasting and analyzing stock beta coefficients, built with Django REST Framework backend and Next.js frontend.
+A web application for forecasting and analyzing stock beta coefficients, built with a Django REST Framework backend and a Next.js frontend.
 
 ## Team 11 - Bobbers
 
@@ -28,6 +28,33 @@ We use GitHub Projects for project management. You can view our project board he
 https://github.com/orgs/uoa-compsci399-s2-2025/projects/10
 
 
+## Technologies
+
+Backend (Python):
+- Python 3.10+
+- Django 5.2.5
+- Django REST Framework 3.16.1
+- django-cors-headers 4.7.0
+- django-environ 0.12.0
+- djangorestframework-simplejwt 5.5.1
+- psycopg2 2.9.10 (PostgreSQL driver)
+- NumPy 2.1.3, pandas 2.2.2
+- Matplotlib, statsmodels, scikit-learn, joblib (modeling/analysis)
+- boto3, django-storages (optional: cloud storage integration)
+- Tooling: pytest 8.4.1, pytest-django 4.11.1, pytest-cov 6.2.1, ruff 0.12.11
+
+Frontend (TypeScript/React):
+- Node.js 18.18+ or 20+
+- Next.js 15.4.7, React 18.3.1, TypeScript 5.9.2
+- Tailwind CSS 4.1.9
+- axios 1.12.2, recharts 3.1.2
+- Radix UI component primitives (various @radix-ui/* packages)
+- zod 3.25.67, react-hook-form 7.60.0
+
+Infrastructure:
+- PostgreSQL 14+ (local dev) and pgAdmin 4 (optional)
+
+
 ## Usage Examples
 
 
@@ -50,7 +77,6 @@ Follow the steps below to configure and run the backend server and frontend loca
 1. **Python**: Ensure Python 3.10 or higher is installed on your system.
 2. **PostgreSQL**: Install PostgreSQL and set up a database.
 3. **PgAdmin4**: Download and install PgAdmin4 for managing your PostgreSQL database.
-
 
 ## Dependencies
 
@@ -147,21 +173,23 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api
 
 ### 3. Install dependencies:
 ```bash
-npm install
+# From the repo root
+cd frontend
+pnpm install
 ```
 
-### 4. Start the development server:
+### 4. Start the frontend development server
 ```bash
-npm run dev
+pnpm dev
 ```
 Open your browser and navigate to http://127.0.0.1:3000 to view the frontend application.
 
-### 6. If you want to build the frontend for production, run:
+### 5. If you want to build the frontend for production, run:
 ```bash
-npm run build
+pnpm build
 
 #once the application is built, serve it with:
-npm start
+pnpm start
 ``` 
 
 
