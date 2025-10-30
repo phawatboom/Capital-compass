@@ -1,6 +1,4 @@
 from django.urls import path, include
-from django.conf.urls.static import static
-from django.conf import settings
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -33,25 +31,8 @@ from .views import (
     factor_stats_latest_summary,
     factor_stats_summary,
     factor_stats_oos_table,
-    # Dual-model architecture views
-    #UnifiedAnalysisView,
-    #UnifiedAnalysisResultView,
-    #ModelComparisonView,
-    # Beta coefficient model output views
-    #BetaRealizedListView,
-    #ForecastEvaluationListView,
-    #BetaCoefficientSummaryView,
-    #BetaCoefficientTimeSeriesView,
-    #ImportBetaDataView,
 )
 
-# Universal model imports
-# from .views_universal import (
-#     ImportUniversalDataView,
-#     UniversalBetaDashboardView,
-#     UniversalBetaTimeSeriesView,
-#     UniversalModelSummaryView,
-# )
 
 # Integrated workflow imports
 from .views_integrated import (
@@ -96,12 +77,7 @@ urlpatterns = [
     path("factors/summary/", factor_summary, name="factor-summary"),
     path("factors/shared/", factor_shared, name="factor-shared"),
     path("beta/timeseries/<str:ticker>/", beta_timeseries, name="beta_timeseries"),
-    
-    # Universal Beta Model endpoints (PRIMARY for client use) - Commented out until views_universal.py is created
-    # path('universal/import/', ImportUniversalDataView.as_view(), name='universal-import'),
-    # path('universal/dashboard/', UniversalBetaDashboardView.as_view(), name='universal-dashboard'),
-    # path('universal/timeseries/', UniversalBetaTimeSeriesView.as_view(), name='universal-timeseries'),
-    # path('universal/summary/', UniversalModelSummaryView.as_view(), name='universal-summary'),
+
     
     # Integrated Client Workflow endpoints (Upload -> Process -> View)
     path('integrated/upload/', IntegratedUploadView.as_view(), name='integrated-upload'),
