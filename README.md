@@ -1,9 +1,9 @@
 # Capital Compass, a Beta Coefficient Prediction Platform
 
 
-A comprehensive web application for forecasting and analyzing stock beta coefficients, built with Django REST Framework backend and Next.js frontend.
+A web application for forecasting and analyzing stock beta coefficients, built with Django REST Framework backend and Next.js frontend.
 
-## 👥 Team 11 - Bobbers
+## Team 11 - Bobbers
 
 | Name              | Specialization            |
 |-------------------| ------------------------- |
@@ -14,11 +14,11 @@ A comprehensive web application for forecasting and analyzing stock beta coeffic
 | Shawna Chandra    | Model/Stats     |
 | Josh Nguyen       | Model/Stats     |
 
+## What is Capital Compass?
 
-
-### Deployment Guide
-
-For detailed production deployment instructions, see **[readme-files/DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**
+Capital Compass is a web application designed to predict and analyze the beta coefficients of stocks. 
+Beta coefficients are crucial in finance as they measure a stock's volatility relative to the overall market. 
+By accurately predicting these coefficients, investors can make informed decisions about their portfolios, balancing risk and return effectively.
 
 
 ## Project Management Tool
@@ -27,6 +27,14 @@ We use GitHub Projects for project management. You can view our project board he
 
 https://github.com/orgs/uoa-compsci399-s2-2025/projects/10
 
+
+## Usage Examples
+
+
+## Public-Facing URL
+
+The application is currently live at the following URL:
+### http://3.104.120.14
 
 
 # Web Application Setup Guide
@@ -89,8 +97,10 @@ cd backend
 python -m venv venv
 
 # Activate the virtual environment
+
 # On Windows:
 venv\Scripts\activate
+
 # On macOS/Linux:
 source venv/bin/activate
 
@@ -115,10 +125,9 @@ python manage.py runserver
 
 The server will start at http://127.0.0.1:8000/.
 
-
+---
 
 ## Frontend Setup
-
 
 
 1. Go to the frontend directory:
