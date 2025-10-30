@@ -77,6 +77,7 @@ Follow the steps below to configure and run the backend server and frontend loca
 1. **Python**: Ensure Python 3.10 or higher is installed on your system.
 2. **PostgreSQL**: Install PostgreSQL and set up a database.
 3. **PgAdmin4**: Download and install PgAdmin4 for managing your PostgreSQL database.
+4. **Node.js and pnpm**: Install Node.js (version 18.18 or higher) and pnpm package manager for the frontend.
 
 ## Dependencies
 
@@ -196,6 +197,12 @@ pnpm start
 ---
 
 # Future Plans
+
+In future versions of our product, a central focus would be the implementation of machine learning to enhance the models accuracy. The current system only uses statistical indicators and standard time-series metrics derived from the returns data. In the future developments should incorporate predictive models capable of learning complex, subtle, and nonlinear relationships in complex and noisy market data. Techniques such as recurrent neural networks (RNNs), random forests, and gradient boosting should be explored thoroughly because these technologies are industry standard for this type of analysis.
+
+Another important change will be to expand the dataset beyond simple returns derived features. We think incorporating other data such as volume, order book dynamics, sentiment indicators, and companies finances etc could provide more insight into stock behavior. 
+
+For the web application, implementing permission tiers is a significant step toward scalability and security. Future versions of the web application should support multiple account types, from basic users with access to the analysis, to more advanced users who can run analysis, or adjust model parameters etc.
 
 ---
 
