@@ -40,8 +40,8 @@ The application is currently live at the following URL:
 # Web Application Setup Guide
 
 This guide will walk you through setting up the backend for the project. 
-The backend is built using Django.
-Follow the steps below to configure and run the backend server.
+The backend is built using Django. The frontend is built using Next.js
+Follow the steps below to configure and run the backend server and frontend locally.
 
 ---
 
@@ -51,6 +51,11 @@ Follow the steps below to configure and run the backend server.
 2. **PostgreSQL**: Install PostgreSQL and set up a database.
 3. **PgAdmin4**: Download and install PgAdmin4 for managing your PostgreSQL database.
 
+
+## Dependencies
+
+1. **Backend Dependencies**: Listed in `requirements.txt` in the backend directory.
+2. **Frontend Dependencies**: Listed in `package.json` in the frontend directory.
 ---
 
 ## Clone the Repository
@@ -130,29 +135,31 @@ The server will start at http://127.0.0.1:8000/.
 ## Frontend Setup
 
 
-1. Go to the frontend directory:
+### 1. Go to the frontend directory:
 ```bash
 cd frontend
 ```
 
-2. Create a frontend `.env` file with the following contents:
+### 2. Create a frontend `.env` file with the following contents:
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api 
 ```
 
-3. Install dependencies:
+### 3. Install dependencies:
 ```bash
 npm install
 ```
 
-4. Start the development server:
+### 4. Start the development server:
 ```bash
 npm run dev
 ```
+Open your browser and navigate to http://127.0.0.1:3000 to view the frontend application.
 
-5. Open your browser and navigate to http://127.0.0.1:3000 to view the frontend application.
-
-6. If you want to build the frontend for production, run:
+### 6. If you want to build the frontend for production, run:
 ```bash
 npm run build
+
+#once the application is built, serve it with:
+npm start
 ``` 
