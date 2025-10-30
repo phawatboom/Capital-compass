@@ -163,3 +163,19 @@ npm run build
 #once the application is built, serve it with:
 npm start
 ``` 
+
+
+---
+
+# Future Plans
+
+---
+
+# Acknowledgements
+
+We would like to acknowledge our client Nicholas Bangnall for his invaluable guidance 
+and support throughout the development of this project.
+
+We would also like to thank our Anna Trofimova, course instructors and teaching assistants for their assistance and feedback.
+
+Finally, we appreciate the open-source community for providing the tools and libraries that made this project possible.
