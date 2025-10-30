@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Stock, StockData, CSVUploadRecord, StockOOSMetric, UserProfile, 
-    BetaForecastResult, MeanReversionResult, BetaRealized, ForecastEvaluation, StockFactorResult, FactorSharedStats,
+     BetaRealized, StockFactorResult, FactorSharedStats,
     AnalysisRun, ModelCoefficient, StockPrediction, StockPerformanceMetrics, OutOfSamplePrediction, FoldStatistics
 )
 from django.contrib.auth import get_user_model
@@ -114,38 +114,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class PasswordChangeSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True)
-
-
-# Dual-Model Architecture Serializers
-
-class BetaForecastResultSerializer(serializers.ModelSerializer):
-    """Serializer for beta forecasting results"""
-    
-    class Meta:
-        model = BetaForecastResult
-        fields = [
-            'forecast_date', 'ticker', 'beta_pred', 'beta_pred_ema',
-            'lo', 'hi', 'r2_ols', 'p_value', 'confidence_level',
-            'confidence_tier', 'delta_beta_20d', 'conf_20d',
-            'agree_adjacent', 'term_unstable', 'action', 'hold_reason'
-        ]
-
-
-class MeanReversionResultSerializer(serializers.ModelSerializer):
-    """Serializer for mean-reversion analysis results"""
-    
-    class Meta:
-        model = MeanReversionResult
-        fields = [
-            'analysis_date', 'ticker', 'z_score_current', 'z_score_trend',
-            'mean_reversion_probability', 'reversion_strength',
-            'magnitude_prediction', 'magnitude_lower_bound', 'magnitude_upper_bound',
-            'calibration_score', 'confidence_interval_90', 'confidence_interval_95',
-            'historical_accuracy', 'lookback_period_days',
-            'recommendation', 'recommendation_confidence'
-        ]
-
-
 class UnifiedAnalysisResultSerializer(serializers.Serializer):
     """Unified serializer supporting both model types"""
     
@@ -196,30 +164,6 @@ class AnalysisRequestSerializer(serializers.Serializer):
         required=False,
         help_text="Optional list of specific tickers to analyze"
     )
-
-
-# Beta Coefficient Model Output Serializers
-class BetaRealizedSerializer(serializers.ModelSerializer):
-    """Serializer for beta realized data from betas_20d.csv"""
-    
-    class Meta:
-        model = BetaRealized
-        fields = [
-            'date', 'ticker', 'beta_realised', 'r2_ols_x', 'r2_ols_y',
-            'p_value', 'significance_score', 'beta_pred', 'beta_true',
-            'band', 'lo', 'hi'
-        ]
-
-
-class ForecastEvaluationSerializer(serializers.ModelSerializer):
-    """Serializer for forecast evaluation data from forecast_eval_20d.csv"""
-    
-    class Meta:
-        model = ForecastEvaluation
-        fields = [
-            'date', 'ticker', 'r2_ols', 'p_value', 'significance_score',
-            'beta_pred', 'beta_true', 'band'
-        ]
 
 
 class BetaCoefficientSummarySerializer(serializers.Serializer):
