@@ -63,7 +63,6 @@ Create a `.env` file in the `./backend/backend` folder with the following format
 DB_ENGINE=postgres
 DEBUG=True
 SECRET_KEY=django-insecure-5^xeqdu*#8a0agg1y&#@o7%sxw+l35mv1%!w@p%a_0qf*t@&j=
-
 DB_NAME=your_database_name
 DB_USER=your_database_user
 DB_PASSWORD=your_database_password
@@ -127,10 +126,13 @@ The server will start at http://127.0.0.1:8000/.
 cd frontend
 ```
 
+2. Create a frontend `.env` file with the following contents:
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api 
+```
+
 3. Install dependencies:
 ```bash
-npm install
-npm install 
 npm install
 ```
 
@@ -139,7 +141,7 @@ npm install
 npm run dev
 ```
 
-5. Open your browser and navigate to http://localhost:3000 to view the frontend application.
+5. Open your browser and navigate to http://127.0.0.1:3000 to view the frontend application.
 
 6. If you want to build the frontend for production, run:
 ```bash
