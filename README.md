@@ -173,7 +173,7 @@ npm start
 
 # Acknowledgements
 
-We would like to acknowledge our client Nicholas Bangnall for his invaluable guidance 
+We would like to acknowledge our client Nicholas Bagnall for his invaluable guidance 
 and support throughout the development of this project.
 
 We would also like to thank our Anna Trofimova, course instructors and teaching assistants for their assistance and feedback.
