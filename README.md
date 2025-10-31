@@ -209,8 +209,10 @@ For the web application, implementing permission tiers is a significant step tow
 # Acknowledgements
 
 We would like to acknowledge our client Nicholas Bagnall for his invaluable guidance 
-and support throughout the development of this project.
+and support throughout the development of this project. 
 
 We would also like to thank our Anna Trofimova, course instructors and teaching assistants for their assistance and feedback.
+
+We would also like to thank Matt Edwards and Andrew Balemni for their help with the model.
 
 Finally, we appreciate the open-source community for providing the tools and libraries that made this project possible.
