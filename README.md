@@ -1,4 +1,4 @@
-# Capital Compass — Beta Coefficient Prediction Platform
+# Project 35: Developing quantitative tools to assist trading decisions in US equity market.
 
 
 A web application for forecasting and analyzing stock beta coefficients, built with a Django REST Framework backend and a Next.js frontend.
