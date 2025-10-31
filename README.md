@@ -5,14 +5,14 @@ A web application for forecasting and analyzing stock beta coefficients, built w
 
 ## Team 11 - Bobbers
 
-| Name              | Specialization            |
-|-------------------| ------------------------- |
-| Henri Chemla      | Web Application |
-| Trey Miller-Henry | Web Application |
+| Name               | Specialization            |
+|--------------------| ------------------------- |
+| Henri Chemla       | Web Application |
+| Trey Miller-Henry  | Web Application |
 | Phawat Saengsiripongpun | Web Application |
-| Charles Benson    | Model/Stats     |
-| Shawna Chandra    | Model/Stats     |
-| Josh Nguyen       | Model/Stats     |
+| Charles Benson     | Model/Stats     |
+| Shawna Chandra     | Model/Stats     |
+| Hoang Nguyen       | Model/Stats     |
 
 ## What is Capital Compass?
 
