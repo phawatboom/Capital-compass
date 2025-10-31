@@ -5,18 +5,18 @@ A web application for forecasting and analyzing stock beta coefficients, built w
 
 ## Team 11 - Bobbers
 
-| Name               | Specialization            |
-|--------------------| ------------------------- |
-| Henri Chemla       | Web Application |
-| Trey Miller-Henry  | Web Application |
-| Phawat Saengsiripongpun | Web Application |
-| Charles Benson     | Model/Stats     |
-| Shawna Chandra     | Model/Stats     |
-| Hoang Nguyen       | Model/Stats     |
+| Name               | Github Username | Specialization  |
+|--------------------|-----------------|-----------------|
+| Henri Chemla       | neryadom        | Web Application |
+| Trey Miller-Henry  |                 | Web Application |
+| Phawat Saengsiripongpun|                 | Web Application |
+| Charles Benson     |                 | Model/Stats     |
+| Shawna Chandra     |                 | Model/Stats     |
+| Hoang Nguyen       |                 | Model/Stats     |
 
 ## What is Capital Compass?
 
-Capital Compass is a web application designed to predict and analyze the beta coefficients of stocks. 
+Our application called Capital Compass is designed to predict and analyze the beta coefficients of stocks. 
 Beta coefficients are crucial in finance as they measure a stock's volatility relative to the overall market. 
 By accurately predicting these coefficients, investors can make informed decisions about their portfolios, balancing risk and return effectively.
 
