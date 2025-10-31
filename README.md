@@ -57,21 +57,15 @@ Infrastructure:
 
 ## Usage Examples
 
-Our work analyses the short-term trending/mean reverting behaviour of stocks, to help guide investors in fine-tuning the timing of their buy/sell decisions instead of doing so arbitrarily and risking value loss.
-
 ### 1. Create Your Account
 
 Visit **[Capital Compass](http://3.104.120.14/)** and register for a free account.
 After signing up, customize your **Profile Page** by adding your name, avatar, and contact details to personalize your experience.
 
----
-
 ### 2. Explore the Home Page
 
 The **Home** page provides a clear overview of the application’s purpose: to forecast stock beta coefficients and analyze risk-adjusted performance.
 You’ll also find links to view results, upload new data, and access documentation.
-
----
 
 ### 3. Upload Stock Data
 
@@ -86,8 +80,6 @@ Navigate to the **Upload Data** page and provide a pre-formatted **Excel spreads
 
 Once uploaded, the file is securely stored and appears under **My Data**. Large uploads (up to ~120 MB) are processed in the background while you continue browsing.
 
----
-
 ### 4. Manage Your Data
 
 In the **My Data** section, you can:
@@ -98,8 +90,6 @@ In the **My Data** section, you can:
 * Launch analysis on selected datasets
 
 This interface is designed for convenience, allowing users to organize multiple datasets seamlessly.
-
----
 
 ### 5. Configure and Run Analysis
 
@@ -113,8 +103,6 @@ Here you can set model hyperparameters such as:
 You may use the default parameters or fine-tune them before clicking **Run Analysis**.
 A full analysis typically completes in **~3 hours per horizon** on our AWS EC2 server (4 vCPUs, 16 GB RAM).
 
----
-
 ### 6. View and Interpret Results
 
 When processing is complete, results appear on the **Results Page**.
@@ -126,25 +114,20 @@ Each entry includes:
 
 The visualized beta time series helps users quickly identify whether a stock exhibits **momentum** (β > 0) or **mean-reversion** (β < 0), supported by conformal prediction confidence bands.
 
----
-
 ### 7. Additional Features
 
 * **Historical Stock Explorer**: browse and visualize past stock performance.
 * **Profile Customization**: personalize your dashboard with your details and avatar.
 * **Efficient Deployment**: all services (frontend, backend, and database) run on a single AWS EC2 instance using TMUX for lightweight orchestration.
 
----
-
 ### Example Workflow Summary
 
 **User Action → Frontend (React + Next.js) → Django API → Model Execution → Results Dashboard**
 
----
-
 **Tip:** For large batch analyses, run overnight for optimal performance.
 Your results will be ready when you return.
 
+---
 
 ## Public-Facing URL
 
@@ -304,5 +287,6 @@ We would also like to thank our Anna Trofimova, course instructors and teaching 
 We would also like to thank Matt Edwards and Andrew Balemni for their help with the model.
 
 Finally, we appreciate the open-source community for providing the tools and libraries that made this project possible.
+
 
 
