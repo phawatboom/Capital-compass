@@ -5,14 +5,14 @@ A web application for forecasting and analyzing stock beta coefficients, built w
 
 ## Team 11 - Bobbers
 
-| Name               | Github Username | Specialization  |
-|--------------------|-----------------|-----------------|
-| Henri Chemla       | neryadom        | Web Application |
-| Trey Miller-Henry  |                 | Web Application |
+| Name               | Github Username        | Specialization  |
+|--------------------|------------------------|-----------------|
+| Henri Chemla       | neryadom               | Web Application |
+| Trey Miller-Henry  |                        | Web Application |
 | Phawat Saengsiripongpun| psae970 and phawatboom | Web Application |
-| Charles Benson     |                 | Model/Stats     |
-| Shawna Chandra     |                 | Model/Stats     |
-| Hoang Nguyen       | joshnguyencodes | Model/Stats     |
+| Charles Benson     | chimneysweepboy        | Model/Stats     |
+| Shawna Chandra     |                        | Model/Stats     |
+| Hoang Nguyen       | joshnguyencodes        | Model/Stats     |
 
 ## What is Capital Compass?
 
