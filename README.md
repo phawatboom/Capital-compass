@@ -11,7 +11,7 @@ A web application for forecasting and analyzing stock beta coefficients, built w
 | Trey Miller-Henry  | tmil533               | Web Application |
 | Phawat Saengsiripongpun| psae970 and phawatboom | Web Application |
 | Charles Benson     | chimneysweepboy       | Model/Stats     |
-| Shawna Chandra     |                       | Model/Stats     |
+| Shawna Chandra     | shawnakanielle        | Model/Stats     |
 | Hoang Nguyen       | joshnguyencodes       | Model/Stats     |
 
 ## What is Capital Compass?
