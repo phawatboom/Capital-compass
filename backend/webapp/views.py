@@ -684,103 +684,83 @@ def factor_summary(request):
 from datetime import date as _date, datetime
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+# views.py  (drop-in replacement)
+from datetime import date as _date, datetime
+from django.db.models import Q
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .serializers import StockFactorTimeSeriesSerializer
+from .models import StockFactorResult, FactorSharedStats, ForecastEvaluation
+
 
 @api_view(["GET"])
-def beta_timeseries(request, ticker: str):
-    """
-    Return time series for a ticker:
-      dates: ISO strings
-      beta_pred: list[float]
-      beta_true: list[float or null]
-      confidence_bands: list[{"lower": float, "upper": float}]
-    Source of truth: ForecastEvaluation; fallback to BetaRealized if empty.
-    """
+def beta_timeseries(request, ticker):
+    # 0) Normalise and alias the ticker to avoid space/no-space mismatches
+    raw = (ticker or "").strip().upper()
+    aliases = {raw, raw.replace(" ", ""), raw.replace("/", "-"), raw.replace("/", ""), raw.replace(".", "")}
 
-    # optional horizon request param used only for labeling
-    try:
-        requested_horizon = int(request.GET.get("horizon", 5))
-    except ValueError:
-        requested_horizon = 5
+    # 1) Select StockFactorResult rows for this ticker and horizon context
+    shared_id = request.GET.get("shared_id")
+    horizon_q = request.GET.get("horizon")
+    qs = StockFactorResult.objects.filter(Q(ticker__in=aliases) | Q(ticker__iexact=raw))
 
-    # 1) Load primary source: ForecastEvaluation
-    from .models import ForecastEvaluation, BetaRealized
-
-    fe_qs = (
-        ForecastEvaluation.objects
-        .filter(ticker=ticker)
-        .order_by("date")
-        .values("date", "beta_pred", "beta_true", "band")
-    )
-
-    use_fallback = not fe_qs.exists()
-
-    if not use_fallback:
-        # Build arrays from ForecastEvaluation
-        dates_dt = [row["date"] for row in fe_qs]
-        preds = [float(row["beta_pred"]) if row["beta_pred"] is not None else None for row in fe_qs]
-        truths = [row["beta_true"] for row in fe_qs]  # may be None
-        bands = [row["band"] for row in fe_qs]        # may be None
-        confidence_bands = []
-        for p, b in zip(preds, bands):
-            if p is None:
-                confidence_bands.append({"lower": None, "upper": None})
-            elif b is not None:
-                confidence_bands.append({"lower": p - b, "upper": p + b})
-            else:
-                confidence_bands.append({"lower": p - 0.02, "upper": p + 0.02})
+    if shared_id:
+        qs = qs.filter(shared_stats_id=int(shared_id))
+    elif horizon_q:
+        qs = qs.filter(shared_stats__horizon_days=int(horizon_q))
     else:
-        # Fallback: use BetaRealized fields if ForecastEvaluation has no rows
-        br_qs = (
-            BetaRealized.objects
-            .filter(ticker=ticker)
-            .order_by("date")
-            .values("date", "beta_pred", "beta_true", "lo", "hi")
-        )
-        if not br_qs.exists():
-            # Return empty series if nothing in either table
-            return Response({
-                "ticker": ticker,
-                "horizon": requested_horizon,
-                "dates": [],
-                "beta_pred": [],
-                "beta_true": [],
-                "confidence_bands": [],
-            })
+        latest_shared = FactorSharedStats.objects.latest("created_at")
+        qs = qs.filter(shared_stats=latest_shared)
 
-        dates_dt = [row["date"] for row in br_qs]
-        preds = [float(row["beta_pred"]) if row["beta_pred"] is not None else None for row in br_qs]
-        truths = [row["beta_true"] for row in br_qs]
-        confidence_bands = []
-        for p, lo, hi in [(row["beta_pred"], row["lo"], row["hi"]) for row in br_qs]:
-            if p is None or lo is None or hi is None:
-                confidence_bands.append({"lower": None, "upper": None})
-            else:
-                confidence_bands.append({"lower": float(lo), "upper": float(hi)})
+    qs = qs.order_by("created_at")
+    if not qs.exists():
+        # Graceful empty series so the modal still opens
+        return Response({"ticker": raw, "horizon": int(horizon_q or 5),
+                         "dates": [], "beta_pred": [], "beta_true": [], "confidence_bands": []})
 
-    # 2) Normalize dates for JSON
+    # 2) Serialize prediction series from SFR
+    data = StockFactorTimeSeriesSerializer(qs, many=True).data
+    dates_raw = [row["created_at"] for row in data]
+    preds = [row["b_coefficient"] for row in data]
+
+    # 3) Normalise dates to pure date objects
     def _to_date(x):
-        if isinstance(x, _date):
-            return x
+        if isinstance(x, _date): return x
         if isinstance(x, str):
-            try:
-                return datetime.fromisoformat(x).date()
-            except ValueError:
-                return datetime.strptime(x[:10], "%Y-%m-%d").date()
+            try: return datetime.fromisoformat(x).date()
+            except ValueError: return datetime.strptime(x[:10], "%Y-%m-%d").date()
         return x.date()
 
-    dates_iso = [_to_date(d).isoformat() for d in dates_dt]
+    dates_dt = [_to_date(d) for d in dates_raw]
 
-    # 3) Pick a horizon label if available in request, else default
-    horizon_days = requested_horizon
+    # 4) Optional truth join from ForecastEvaluation
+    fe = (ForecastEvaluation.objects
+          .filter(Q(ticker__in=aliases) | Q(ticker__iexact=raw), date__in=dates_dt)
+          .values("date", "beta_true", "band"))
+    fe_true = {r["date"]: r["beta_true"] for r in fe}
+    fe_band = {r["date"]: r["band"] for r in fe}
+    truths = [fe_true.get(d) for d in dates_dt]
+
+    # 5) Confidence bands: use FE band when present, else small symmetric default
+    confidence_bands = []
+    for d, p in zip(dates_dt, preds):
+        b = fe_band.get(d)
+        if p is None:
+            confidence_bands.append({"lower": None, "upper": None})
+        elif b is not None:
+            confidence_bands.append({"lower": p - b, "upper": p + b})
+        else:
+            confidence_bands.append({"lower": p - 0.02, "upper": p + 0.02})
 
     return Response({
-        "ticker": ticker,
-        "horizon": horizon_days,
-        "dates": dates_iso,
+        "ticker": raw,
+        "horizon": data[0].get("horizon_days"),  # from SFR serializer
+        "dates": [d.isoformat() for d in dates_dt],
         "beta_pred": preds,
         "beta_true": truths,
         "confidence_bands": confidence_bands,
     })
+
 
 # 2. Authentication and Permissions
 # --- CSRF bootstrap ---
