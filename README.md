@@ -9,7 +9,7 @@ A web application for forecasting and analyzing stock beta coefficients, built w
 |--------------------|-----------------|-----------------|
 | Henri Chemla       | neryadom        | Web Application |
 | Trey Miller-Henry  |                 | Web Application |
-| Phawat Saengsiripongpun|             | Web Application |
+| Phawat Saengsiripongpun| psae970 and phawatboom | Web Application |
 | Charles Benson     |                 | Model/Stats     |
 | Shawna Chandra     |                 | Model/Stats     |
 | Hoang Nguyen       | joshnguyencodes | Model/Stats     |
@@ -216,4 +216,5 @@ We would also like to thank our Anna Trofimova, course instructors and teaching 
 We would also like to thank Matt Edwards and Andrew Balemni for their help with the model.
 
 Finally, we appreciate the open-source community for providing the tools and libraries that made this project possible.
+
 
