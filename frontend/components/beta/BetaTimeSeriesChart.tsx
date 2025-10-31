@@ -196,7 +196,7 @@ export function BetaTimeSeriesChart({ data, loading = false }: BetaTimeSeriesCha
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 name="Beta True"
-                connectNulls={false}
+                connectNulls
               />
             </LineChart>
           </ResponsiveContainer>

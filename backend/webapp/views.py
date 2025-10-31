@@ -681,43 +681,106 @@ def factor_summary(request):
         "created_at": shared.created_at,
     })
 
+from datetime import date as _date, datetime
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
-# views.py  (replace beta_timeseries with this)
 @api_view(["GET"])
-def beta_timeseries(request, ticker):
-    ticker = ticker.strip().upper()
-    shared_id = request.GET.get("shared_id")
-    horizon_q = request.GET.get("horizon")
+def beta_timeseries(request, ticker: str):
+    """
+    Return time series for a ticker:
+      dates: ISO strings
+      beta_pred: list[float]
+      beta_true: list[float or null]
+      confidence_bands: list[{"lower": float, "upper": float}]
+    Source of truth: ForecastEvaluation; fallback to BetaRealized if empty.
+    """
 
-    qs = StockFactorResult.objects.filter(ticker__iexact=ticker)
+    # optional horizon request param used only for labeling
+    try:
+        requested_horizon = int(request.GET.get("horizon", 5))
+    except ValueError:
+        requested_horizon = 5
 
-    if shared_id:
-        qs = qs.filter(shared_stats_id=int(shared_id))
-    elif horizon_q:
-        qs = qs.filter(shared_stats__horizon_days=int(horizon_q))
+    # 1) Load primary source: ForecastEvaluation
+    from .models import ForecastEvaluation, BetaRealized
+
+    fe_qs = (
+        ForecastEvaluation.objects
+        .filter(ticker=ticker)
+        .order_by("date")
+        .values("date", "beta_pred", "beta_true", "band")
+    )
+
+    use_fallback = not fe_qs.exists()
+
+    if not use_fallback:
+        # Build arrays from ForecastEvaluation
+        dates_dt = [row["date"] for row in fe_qs]
+        preds = [float(row["beta_pred"]) if row["beta_pred"] is not None else None for row in fe_qs]
+        truths = [row["beta_true"] for row in fe_qs]  # may be None
+        bands = [row["band"] for row in fe_qs]        # may be None
+        confidence_bands = []
+        for p, b in zip(preds, bands):
+            if p is None:
+                confidence_bands.append({"lower": None, "upper": None})
+            elif b is not None:
+                confidence_bands.append({"lower": p - b, "upper": p + b})
+            else:
+                confidence_bands.append({"lower": p - 0.02, "upper": p + 0.02})
     else:
-        latest_shared = FactorSharedStats.objects.latest("created_at")
-        qs = qs.filter(shared_stats=latest_shared)
+        # Fallback: use BetaRealized fields if ForecastEvaluation has no rows
+        br_qs = (
+            BetaRealized.objects
+            .filter(ticker=ticker)
+            .order_by("date")
+            .values("date", "beta_pred", "beta_true", "lo", "hi")
+        )
+        if not br_qs.exists():
+            # Return empty series if nothing in either table
+            return Response({
+                "ticker": ticker,
+                "horizon": requested_horizon,
+                "dates": [],
+                "beta_pred": [],
+                "beta_true": [],
+                "confidence_bands": [],
+            })
 
-    qs = qs.order_by("created_at")
-    if not qs.exists():
-        return Response({"detail": f"No time series found for ticker {ticker}."}, status=404)
+        dates_dt = [row["date"] for row in br_qs]
+        preds = [float(row["beta_pred"]) if row["beta_pred"] is not None else None for row in br_qs]
+        truths = [row["beta_true"] for row in br_qs]
+        confidence_bands = []
+        for p, lo, hi in [(row["beta_pred"], row["lo"], row["hi"]) for row in br_qs]:
+            if p is None or lo is None or hi is None:
+                confidence_bands.append({"lower": None, "upper": None})
+            else:
+                confidence_bands.append({"lower": float(lo), "upper": float(hi)})
 
-    serializer = StockFactorTimeSeriesSerializer(qs, many=True)
-    data = serializer.data
+    # 2) Normalize dates for JSON
+    def _to_date(x):
+        if isinstance(x, _date):
+            return x
+        if isinstance(x, str):
+            try:
+                return datetime.fromisoformat(x).date()
+            except ValueError:
+                return datetime.strptime(x[:10], "%Y-%m-%d").date()
+        return x.date()
+
+    dates_iso = [_to_date(d).isoformat() for d in dates_dt]
+
+    # 3) Pick a horizon label if available in request, else default
+    horizon_days = requested_horizon
 
     return Response({
         "ticker": ticker,
-        "horizon": data[0].get("horizon_days"),
-        "dates": [row["created_at"] for row in data],
-        "beta_pred": [row["b_coefficient"] for row in data],
-        "beta_true": [None for _ in data],  # placeholder
-        "confidence_bands": [
-            {"lower": row["b_coefficient"] - 0.02, "upper": row["b_coefficient"] + 0.02}
-            for row in data
-        ],
+        "horizon": horizon_days,
+        "dates": dates_iso,
+        "beta_pred": preds,
+        "beta_true": truths,
+        "confidence_bands": confidence_bands,
     })
-
 
 # 2. Authentication and Permissions
 # --- CSRF bootstrap ---
