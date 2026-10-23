@@ -50,7 +50,3 @@ These are **verification questions**, not claims that each mechanism is implemen
 3. Validate the statistical interpretation and all README claims against model code and outputs.
 4. Replace raw-IP HTTP demo references with a verified HTTPS deployment link if a current deployment exists, or identify them as historical.
 5. Record actual benchmarks for computation time, file size and runtime resources.
-
-## Portfolio integrity
-
-Avoid stating that you alone developed all of this team project. Specify the components you owned and refer to individual commits/PRs where possible. A strong case study makes your contribution verifiable.
